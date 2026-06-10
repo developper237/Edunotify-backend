@@ -1,0 +1,331 @@
+// shared/prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  super_admin
+  admin
+  chef_departement
+  delegue
+  etudiant
+}
+
+enum StatutCompte {
+  actif
+  inactif
+  premier_login
+}
+
+enum Plan {
+  free
+  premium
+}
+
+enum Formation {
+  FI
+  FA
+}
+
+enum Niveau {
+  L1
+  L2
+  L3
+  M1
+  M2
+}
+
+enum TypeSeance {
+  Cours
+  TD
+  TP
+  Examen
+  Rattrapage
+}
+
+enum StatutPresence {
+  present
+  absent
+}
+
+enum CategorieNotif {
+  administratif
+  examen
+  resultat
+  cours
+  sondage
+}
+
+enum StatutRequete {
+  en_attente
+  traitee
+  rejetee
+}
+
+model Etablissement {
+  id          String   @id @default(cuid())
+  nom         String
+  ville       String
+  plan        Plan     @default(free)
+  actif       Boolean  @default(true)
+  logoUrl     String?
+  gpsLat      Float?
+  gpsLng      Float?
+  gpsRayon    Int      @default(200)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  departements  Departement[]
+  users         User[]
+  notifications Notification[]
+}
+
+model Departement {
+  id              String   @id @default(cuid())
+  nom             String
+  description     String?
+  etablissementId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  etablissement Etablissement @relation(fields: [etablissementId], references: [id], onDelete: Cascade)
+  classes       Classe[]
+  chefs         User[]        @relation("ChefDepartement")
+  matieres      Matiere[]
+}
+
+model Classe {
+  id            String    @id @default(cuid())
+  nom           String
+  filiere       String
+  niveau        Niveau
+  formation     Formation
+  codeGenere    String    @unique
+  departementId String
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  departement  Departement        @relation(fields: [departementId], references: [id], onDelete: Cascade)
+  etudiants    User[]             @relation("EtudiantClasse")
+  delegues     User[]             @relation("DelegueClasse")
+  sessions     SessionPresence[]
+  matieres     Matiere[]          @relation("MatiereClasse")
+  publications PublicationNotes[]
+}
+
+model User {
+  id                String       @id @default(cuid())
+  nom               String
+  prenom            String
+  email             String       @unique
+  passwordHash      String
+  role              Role
+  statut            StatutCompte @default(premier_login)
+  matricule         String?      @unique
+  fcmToken          String?
+  biometrieActivee  Boolean      @default(false)
+  etablissementId   String?
+  departementId     String?
+  classeEtudiantId  String?
+  classeDelegueId   String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  etablissement    Etablissement? @relation(fields: [etablissementId], references: [id])
+  departementChef  Departement?   @relation("ChefDepartement", fields: [departementId], references: [id])
+  classeEtudiant   Classe?        @relation("EtudiantClasse", fields: [classeEtudiantId], references: [id])
+  classeDelegue    Classe?        @relation("DelegueClasse", fields: [classeDelegueId], references: [id])
+
+  presences             Presence[]
+  notificationsEnvoyees Notification[]             @relation("NotifExpediteur")
+  notificationsRecues   NotificationDestinataire[]
+  voteSondages          VoteSondage[]
+  refreshTokens         RefreshToken[]
+  notes                 Note[]                     @relation("EtudiantNotes")
+  notesSaisies          Note[]                     @relation("NotesSaisies")
+  requetes              RequeteNote[]              @relation("EtudiantRequetes")
+  requetesTraitees      RequeteNote[]              @relation("RequetesTraitees")
+  publications          PublicationNotes[]         @relation("PublicationAuteur")
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model SessionPresence {
+  id           String     @id @default(cuid())
+  code         String     @unique
+  matiere      String
+  professeur   String
+  salle        String
+  type         TypeSeance
+  classeId     String
+  delegueId    String
+  ouverteLe    DateTime   @default(now())
+  fermeeLe     DateTime?
+  dureeMinutes Int        @default(5)
+  actif        Boolean    @default(true)
+  gpsLat       Float?
+  gpsLng       Float?
+  rayonMetres  Int?
+  createdAt    DateTime   @default(now())
+
+  classe    Classe     @relation(fields: [classeId], references: [id])
+  presences Presence[]
+}
+
+model Presence {
+  id          String         @id @default(cuid())
+  sessionId   String
+  userId      String
+  statut      StatutPresence @default(present)
+  confirmeA   DateTime       @default(now())
+  methode     String         @default("code")
+  etudiantLat Float?
+  etudiantLng Float?
+  distanceM   Int?
+
+  session SessionPresence @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user    User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, userId])
+}
+
+model Notification {
+  id              String         @id @default(cuid())
+  titre           String
+  contenu         String
+  categorie       CategorieNotif @default(administratif)
+  urgence         Boolean        @default(false)
+  expediteurId    String
+  etablissementId String?
+  estSondage      Boolean        @default(false)
+  createdAt       DateTime       @default(now())
+
+  expediteur    User                       @relation("NotifExpediteur", fields: [expediteurId], references: [id])
+  etablissement Etablissement?             @relation(fields: [etablissementId], references: [id])
+  destinataires NotificationDestinataire[]
+  choixSondage  ChoixSondage[]
+}
+
+model NotificationDestinataire {
+  id             String    @id @default(cuid())
+  notificationId String
+  userId         String
+  lue            Boolean   @default(false)
+  lueLe          DateTime?
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([notificationId, userId])
+}
+
+model ChoixSondage {
+  id             String @id @default(cuid())
+  notificationId String
+  texte          String
+  ordre          Int    @default(0)
+
+  notification Notification  @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  votes        VoteSondage[]
+}
+
+model VoteSondage {
+  id      String   @id @default(cuid())
+  choixId String
+  userId  String
+  voteLe  DateTime @default(now())
+
+  choix ChoixSondage @relation(fields: [choixId], references: [id], onDelete: Cascade)
+  user  User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([choixId, userId])
+}
+
+model Matiere {
+  id            String   @id @default(cuid())
+  nom           String
+  coefficient   Int      @default(1)
+  classeId      String?
+  departementId String?
+  createdAt     DateTime @default(now())
+
+  classe      Classe?      @relation("MatiereClasse", fields: [classeId], references: [id], onDelete: Cascade)
+  departement Departement? @relation(fields: [departementId], references: [id], onDelete: Cascade)
+  notes       Note[]
+  requetes    RequeteNote[]
+}
+
+// ── Publication de notes (session d'évaluation) ──────────────────
+// Exemples de titres :
+//   "Résultats examens session normale S1"
+//   "Résultats TP Algorithmique S2"
+//   "Résultats rattrapage S1"
+model PublicationNotes {
+  id          String   @id @default(cuid())
+  titre       String   // titre libre donné par le chef
+  semestre    String   // "Semestre 1" ou "Semestre 2"
+  classeId    String
+  publiePar   String   // id du chef de département
+  publieLe    DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  classe  Classe @relation(fields: [classeId], references: [id], onDelete: Cascade)
+  auteur  User   @relation("PublicationAuteur", fields: [publiePar], references: [id])
+  notes   Note[]
+}
+
+model Note {
+  id            String   @id @default(cuid())
+  valeur        Float
+  noteMax       Float    @default(20)
+  publiee       Boolean  @default(false)
+  commentaire   String?
+  matiereId     String
+  etudiantId    String
+  saisieParId   String?
+  publicationId String?  // lien vers la publication
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  matiere     Matiere          @relation(fields: [matiereId], references: [id], onDelete: Cascade)
+  etudiant    User             @relation("EtudiantNotes", fields: [etudiantId], references: [id], onDelete: Cascade)
+  saisiepar   User?            @relation("NotesSaisies", fields: [saisieParId], references: [id])
+  publication PublicationNotes? @relation(fields: [publicationId], references: [id])
+  requetes    RequeteNote[]
+
+  // Une note par matière par étudiant PAR publication
+  // (pas de contrainte unique globale — plusieurs sessions possibles)
+}
+
+model RequeteNote {
+  id           String        @id @default(cuid())
+  motif        String
+  statut       StatutRequete @default(en_attente)
+  reponse      String?
+  noteId       String
+  matiereId    String
+  etudiantId   String
+  traiteeParId String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  note       Note    @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  matiere    Matiere @relation(fields: [matiereId], references: [id])
+  etudiant   User    @relation("EtudiantRequetes", fields: [etudiantId], references: [id])
+  traiteepar User?   @relation("RequetesTraitees", fields: [traiteeParId], references: [id])
+}

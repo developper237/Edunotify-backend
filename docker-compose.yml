@@ -1,0 +1,193 @@
+version: '3.9'
+
+services:
+  # ── Infrastructure ────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: edunotify_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: edunotify
+      POSTGRES_PASSWORD: edunotify_secret
+      POSTGRES_DB: edunotify
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U edunotify"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: edunotify_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --requirepass edunotify_redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "edunotify_redis", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: edunotify_rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: edunotify
+      RABBITMQ_DEFAULT_PASS: edunotify_rabbit
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Services ──────────────────────────────────────────────────
+  auth-service:
+    build: ./services/auth-service
+    container_name: edunotify_auth
+    restart: unless-stopped
+    environment:
+      PORT: 3001
+      DATABASE_URL: postgresql://edunotify:edunotify_secret@postgres:5432/edunotify
+      REDIS_URL: redis://:edunotify_redis@redis:6379
+      RABBITMQ_URL: amqp://edunotify:edunotify_rabbit@rabbitmq:5672
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      JWT_EXPIRES_IN: 15m
+      JWT_REFRESH_EXPIRES_IN: 7d
+      GMAIL_USER: ${GMAIL_USER}
+      GMAIL_APP_PASSWORD: ${GMAIL_APP_PASSWORD}
+      APP_NAME: EduNotify
+      APP_URL: ${APP_URL:-http://localhost:8080}
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  user-service:
+    build: ./services/user-service
+    container_name: edunotify_users
+    restart: unless-stopped
+    environment:
+      PORT: 3002
+      DATABASE_URL: postgresql://edunotify:edunotify_secret@postgres:5432/edunotify
+      RABBITMQ_URL: amqp://edunotify:edunotify_rabbit@rabbitmq:5672
+      JWT_SECRET: ${JWT_SECRET}
+    ports:
+      - "3002:3002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  notification-service:
+    build: ./services/notification-service
+    container_name: edunotify_notifications
+    restart: unless-stopped
+    environment:
+      PORT: 3003
+      DATABASE_URL: postgresql://edunotify:edunotify_secret@postgres:5432/edunotify
+      RABBITMQ_URL: amqp://edunotify:edunotify_rabbit@rabbitmq:5672
+      JWT_SECRET: ${JWT_SECRET}
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID}
+      FIREBASE_PRIVATE_KEY: ${FIREBASE_PRIVATE_KEY}
+      FIREBASE_CLIENT_EMAIL: ${FIREBASE_CLIENT_EMAIL}
+    ports:
+      - "3003:3003"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  presence-service:
+    build: ./services/presence-service
+    container_name: edunotify_presence
+    restart: unless-stopped
+    environment:
+      PORT: 3004
+      DATABASE_URL: postgresql://edunotify:edunotify_secret@postgres:5432/edunotify
+      REDIS_URL: redis://:edunotify_redis@redis:6379
+      RABBITMQ_URL: amqp://edunotify:edunotify_rabbit@rabbitmq:5672
+      JWT_SECRET: ${JWT_SECRET}
+      OTP_TTL_SECONDS: 300
+    ports:
+      - "3004:3004"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  academic-service:
+    build: ./services/academic-service
+    container_name: edunotify_academic
+    restart: unless-stopped
+    environment:
+      PORT: 3005
+      DATABASE_URL: postgresql://edunotify:edunotify_secret@postgres:5432/edunotify
+      RABBITMQ_URL: amqp://edunotify:edunotify_rabbit@rabbitmq:5672
+      JWT_SECRET: ${JWT_SECRET}
+    ports:
+      - "3005:3005"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  file-service:
+    build: ./services/file-service
+    container_name: edunotify_files
+    restart: unless-stopped
+    environment:
+      PORT: 3006
+      DATABASE_URL: postgresql://edunotify:edunotify_secret@postgres:5432/edunotify
+      RABBITMQ_URL: amqp://edunotify:edunotify_rabbit@rabbitmq:5672
+      JWT_SECRET: ${JWT_SECRET}
+      UPLOAD_DIR: /uploads
+    ports:
+      - "3006:3006"
+    volumes:
+      - uploads_data:/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ── API Gateway ───────────────────────────────────────────────
+  gateway:
+    build: ./gateway
+    container_name: edunotify_gateway
+    restart: unless-stopped
+    environment:
+      PORT: 8080
+      JWT_SECRET: ${JWT_SECRET}
+      AUTH_SERVICE_URL: http://auth-service:3001
+      USER_SERVICE_URL: http://user-service:3002
+      NOTIFICATION_SERVICE_URL: http://notification-service:3003
+      PRESENCE_SERVICE_URL: http://presence-service:3004
+      ACADEMIC_SERVICE_URL: http://academic-service:3005
+      FILE_SERVICE_URL: http://file-service:3006
+    ports:
+      - "8080:8080"
+    depends_on:
+      - auth-service
+      - user-service
+      - notification-service
+      - presence-service
+      - academic-service
+      - file-service
+
+volumes:
+  postgres_data:
+  uploads_data:
