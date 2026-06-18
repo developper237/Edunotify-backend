@@ -1,40 +1,40 @@
 {
-    "name":  "edunotify-auth-service",
-    "version":  "1.0.0",
-    "description":  "EduNotify Authentication Service",
-    "main":  "src/index.js",
-    "scripts":  {
-                    "start":  "node src/index.js",
-                    "dev":  "nodemon src/index.js",
-                    "db:generate":  "prisma generate --schema=../../shared/prisma/schema.prisma",
-                    "db:migrate":  "prisma migrate deploy --schema=../../shared/prisma/schema.prisma",
-                    "db:push":  "prisma db push --schema=../../shared/prisma/schema.prisma",
-                    "db:seed":  "node src/utils/seed.js",
-                    "test":  "jest --runInBand --forceExit"
-                },
-    "dependencies":  {
-                         "@prisma/client":  "^5.22.0",
-                         "amqplib":  "^0.10.3",
-                         "bcryptjs":  "^2.4.3",
-                         "cors":  "^2.8.6",
-                         "csv-parse":  "^5.5.5",
-                         "dotenv":  "^17.3.1",
-                         "express":  "^4.22.1",
-                         "express-rate-limit":  "^7.5.1",
-                         "express-validator":  "^7.3.1",
-                         "helmet":  "^7.2.0",
-                         "ioredis":  "^5.3.2",
-                         "jsonwebtoken":  "^9.0.3",
-                         "morgan":  "^1.10.1",
-                         "multer":  "^1.4.5-lts.1",
-                         "nanoid":  "^3.3.7",
-                         "nodemailer":  "^6.10.1"
-                     },
-    "devDependencies":  {
-                            "@jest/globals":  "^30.4.1",
-                            "jest":  "^30.4.2",
-                            "nodemon":  "^3.1.0",
-                            "prisma":  "^5.10.0",
-                            "supertest":  "^7.2.2"
-                        }
+  "name": "edunotify-auth-service",
+  "version": "1.0.0",
+  "description": "EduNotify Authentication Service",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "db:generate": "prisma generate --schema=../../shared/prisma/schema.prisma",
+    "db:migrate": "prisma migrate deploy --schema=../../shared/prisma/schema.prisma",
+    "db:push": "prisma db push --schema=../../shared/prisma/schema.prisma",
+    "db:seed": "node src/utils/seed.js"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "amqplib": "^0.10.3",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.6",
+    "csv-parse": "^5.5.5",
+    "dotenv": "^17.3.1",
+    "express": "^4.22.1",
+    "express-rate-limit": "^7.5.1",
+    "express-validator": "^7.3.1",
+    "helmet": "^7.2.0",
+    "ioredis": "^5.3.2",
+    "jsonwebtoken": "^9.0.3",
+    "morgan": "^1.10.1",
+    "multer": "^1.4.5-lts.1",
+    "nanoid": "^3.3.7",
+    "nodemailer": "^6.10.1"
+  },
+  "devDependencies": {
+    "@jest/globals": "^30.4.1",
+    "jest": "^30.4.2",
+    "nodemon": "^3.1.0",
+    "prisma": "^5.10.0",
+    "supertest": "^7.2.2"
+  }
+  
 }
