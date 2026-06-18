@@ -97,6 +97,40 @@ const resolveDestinataires = async (destinataires, user) => {
   return users;
 };
 
+const normalizeSondageQuestions = (body) => {
+  const rawQuestions = Array.isArray(body.questions) && body.questions.length > 0
+    ? body.questions
+    : [{ question: body.question, choix: body.choix }];
+
+  if (!rawQuestions.length) {
+    throw new Error('Au moins une question est requise');
+  }
+
+  return rawQuestions.map((item) => {
+    const question = typeof item?.question === 'string'
+      ? item.question.trim()
+      : '';
+    const obligatoire = Boolean(item?.obligatoire === true || item?.required === true);
+
+    if (!Array.isArray(item?.choix) || item.choix.length < 2) {
+      throw new Error(`La question "${question}" doit contenir au moins 2 choix`);
+    }
+
+    const choix = item.choix
+      .map((texte, index) => ({
+        texte: typeof texte === 'string' ? texte.trim() : '',
+        ordre: index,
+      }))
+      .filter((option) => option.texte.length > 0);
+
+    if (choix.length < 2) {
+      throw new Error(`La question "${question}" doit contenir au moins 2 choix valides`);
+    }
+
+    return { question, choix, obligatoire };
+  });
+};
+
 const NotifController = {
 
   // ── POST /notifications/envoyer ─────────────────────────────────
@@ -157,10 +191,12 @@ const NotifController = {
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { question, choix, destinataires } = req.body;
+    const { destinataires, cible } = req.body;
+    const target = destinataires ?? cible ?? 'classe';
 
     try {
-      const users = await resolveDestinataires(destinataires, req.user);
+      const questions = normalizeSondageQuestions(req.body);
+      const users = await resolveDestinataires(target, req.user);
 
       if (users.length === 0) {
         return res.status(400).json({ error: 'Aucun destinataire trouvé' });
@@ -168,35 +204,73 @@ const NotifController = {
 
       const notification = await prisma.notification.create({
         data: {
-          titre:          `📊 ${question}`,
-          contenu:        question,
+          titre:          questions.length === 1 ? `📊 ${questions[0].question}` : '📊 Sondage multi-questions',
+          contenu:        questions.length === 1
+            ? questions[0].question
+            : questions.map((item) => item.question).join(' • '),
           categorie:      'administratif',
           urgence:        false,
           expediteurId:   req.user.id,
           etablissementId: req.user.etablissementId || null,
           estSondage:     true,
           destinataires: {
-            create: users.map(u => ({ userId: u.id })),
-          },
-          choixSondage: {
-            create: choix.map((texte, index) => ({
-              texte,
-              ordre: index,
-            })),
+            create: users.map((u) => ({ userId: u.id })),
           },
         },
-        include: { choixSondage: true },
       });
+
+      for (const [qIndex, item] of questions.entries()) {
+        const question = await prisma.questionSondage.create({
+          data: {
+            notificationId: notification.id,
+            texte: item.question,
+            ordre: qIndex,
+            obligatoire: item.obligatoire ?? false,
+          },
+        });
+
+        for (const [choiceIndex, option] of item.choix.entries()) {
+          await prisma.choixSondage.create({
+            data: {
+              questionId: question.id,
+              notificationId: notification.id,
+              texte: option.texte,
+              ordre: option.ordre ?? choiceIndex,
+            },
+          });
+        }
+      }
+
+      const fullNotification = await prisma.notification.findUnique({
+        where: { id: notification.id },
+        include: {
+          questionsSondage: {
+            include: { choixSondage: true },
+          },
+        },
+      });
+
+      const surveyQuestions = fullNotification.questionsSondage.map((question) => ({
+        id: question.id,
+        question: question.texte,
+        obligatoire: question.obligatoire ?? false,
+        choix: question.choixSondage,
+      }));
 
       return res.status(201).json({
         message:         `Sondage envoyé à ${users.length} destinataire(s)`,
-        notificationId:  notification.id,
-        choix:           notification.choixSondage,
+        notificationId:  fullNotification.id,
+        questions:      surveyQuestions,
+        choix:           surveyQuestions.flatMap((item) => item.choix),
         nbDestinataires: users.length,
       });
     } catch (err) {
-      
       console.error('[LancerSondage]', err);
+
+      if (err instanceof Error && /Au moins une question|question doit|choix/i.test(err.message)) {
+        return res.status(400).json({ error: err.message });
+      }
+
       return res.status(500).json({ error: 'Erreur serveur' });
     }
   },
@@ -270,17 +344,21 @@ const NotifController = {
           include: {
             notification: {
               include: {
-                expediteur:  {
+                expediteur: {
                   select: {
                     id: true, nom: true, prenom: true, role: true,
                   },
                 },
-                choixSondage: {
+                questionsSondage: {
                   include: {
-                    _count: { select: { votes: true } },
-                    votes: {
-                      where: { userId: req.user.id },
-                      select: { id: true },
+                    choixSondage: {
+                      include: {
+                        _count: { select: { votes: true } },
+                        votes: {
+                          where: { userId: req.user.id },
+                          select: { id: true },
+                        },
+                      },
                     },
                   },
                 },
@@ -294,24 +372,46 @@ const NotifController = {
         prisma.notificationDestinataire.count({ where }),
       ]);
 
-      const notifications = destEntries.map(d => ({
-        id:        d.notificationId,
-        lue:       d.lue,
-        lueLe:     d.lueLe,
-        ...d.notification,
-        expediteur: d.notification.expediteur,
-        monVote:   d.notification.estSondage
-          ? d.notification.choixSondage.find(
-              c => c.votes.length > 0
-            )?.id || null
-          : null,
-        choixSondage: d.notification.choixSondage.map(c => ({
-          id:     c.id,
-          texte:  c.texte,
-          ordre:  c.ordre,
-          votes:  c._count.votes,
-        })),
-      }));
+      const notifications = destEntries.map(d => {
+        const allChoices = d.notification.questionsSondage.flatMap((question) =>
+          question.choixSondage.map((choice) => ({
+            ...choice,
+            questionId: question.id,
+            questionTexte: question.texte,
+          }))
+        );
+
+        return {
+          id:        d.notificationId,
+          lue:       d.lue,
+          lueLe:     d.lueLe,
+          ...d.notification,
+          expediteur: d.notification.expediteur,
+          monVote:   d.notification.estSondage
+            ? allChoices.find((choice) => choice.votes.length > 0)?.id || null
+            : null,
+          questionsSondage: d.notification.questionsSondage.map((question) => ({
+            id: question.id,
+            question: question.texte,
+            obligatoire: question.obligatoire ?? false,
+            ordre: question.ordre,
+            choix: question.choixSondage.map((choice) => ({
+              id: choice.id,
+              texte: choice.texte,
+              ordre: choice.ordre,
+              votes: choice._count.votes,
+            })),
+          })),
+          choixSondage: allChoices.map((choice) => ({
+            id: choice.id,
+            texte: choice.texte,
+            ordre: choice.ordre,
+            votes: choice._count.votes,
+            questionId: choice.questionId,
+            question: choice.questionTexte,
+          })),
+        };
+      });
 
       const nonLuesCount = await prisma.notificationDestinataire.count({
         where: { userId: req.user.id, lue: false },
@@ -367,9 +467,14 @@ const NotifController = {
       const notification = await prisma.notification.findUnique({
         where: { id: notifId },
         include: {
-          choixSondage: {
+          questionsSondage: {
             include: {
-              _count: { select: { votes: true } },
+              choixSondage: {
+                include: {
+                  _count: { select: { votes: true } },
+                },
+                orderBy: { ordre: 'asc' },
+              },
             },
             orderBy: { ordre: 'asc' },
           },
@@ -381,20 +486,42 @@ const NotifController = {
         return res.status(404).json({ error: 'Sondage non trouvé' });
       }
 
-      const totalVotes = notification.choixSondage.reduce(
-        (sum, c) => sum + c._count.votes, 0
+      const allChoices = notification.questionsSondage.flatMap((question) =>
+        question.choixSondage.map((choice) => ({ question, choice }))
+      );
+      const totalVotes = allChoices.reduce(
+        (sum, item) => sum + item.choice._count.votes, 0
       );
 
       return res.json({
-        question:    notification.contenu,
+        question: notification.contenu,
         totalVotes,
         participants: notification._count.destinataires,
-        choix: notification.choixSondage.map(c => ({
-          id:     c.id,
-          texte:  c.texte,
-          votes:  c._count.votes,
-          taux:   totalVotes > 0
-            ? Math.round(c._count.votes / totalVotes * 100)
+        questions: notification.questionsSondage.map((question) => {
+          const questionVotes = question.choixSondage.reduce(
+            (sum, choice) => sum + choice._count.votes, 0
+          );
+
+          return {
+            id: question.id,
+            question: question.texte,
+            totalVotes: questionVotes,
+            choix: question.choixSondage.map((choice) => ({
+              id: choice.id,
+              texte: choice.texte,
+              votes: choice._count.votes,
+              taux: questionVotes > 0
+                ? Math.round(choice._count.votes / questionVotes * 100)
+                : 0,
+            })),
+          };
+        }),
+        choix: allChoices.map(({ choice }) => ({
+          id: choice.id,
+          texte: choice.texte,
+          votes: choice._count.votes,
+          taux: totalVotes > 0
+            ? Math.round(choice._count.votes / totalVotes * 100)
             : 0,
         })),
       });

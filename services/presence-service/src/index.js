@@ -512,7 +512,7 @@ app.post('/presence/sessions/:id/envoyer-rapport',
 // ══════════════════════════════════════════════════════════════════
 
 app.post('/presence/confirmer', auth, requireRole('etudiant'), async (req, res) => {
-  const { code, latitude, longitude } = req.body;
+  const { code, latitude, longitude, deviceId } = req.body;
   if (!code || code.length !== 6)
     return res.status(400).json({ error: 'Code invalide' });
 
@@ -534,13 +534,28 @@ app.post('/presence/confirmer', auth, requireRole('etudiant'), async (req, res) 
     if (classeIdEtudiant !== classeId)
       return res.status(403).json({ error: "Ce code n'est pas destiné à votre classe" });
 
+    // ✅ Vérifier si cet appareil a déjà confirmé pour cette session
+    if (deviceId) {
+      const deviceDejaUtilise = await prisma.presence.findFirst({
+        where:   { sessionId, deviceId, statut: 'present' },
+        include: { user: { select: { prenom: true, nom: true } } },
+      });
+
+      if (deviceDejaUtilise) {
+        return res.status(409).json({
+          error:    `Cet appareil a déjà confirmé la présence de ${deviceDejaUtilise.user.prenom} ${deviceDejaUtilise.user.nom} pour cette séance`,
+          code:     'DEVICE_ALREADY_USED',
+          etudiant: `${deviceDejaUtilise.user.prenom} ${deviceDejaUtilise.user.nom}`,
+        });
+      }
+    }
+
     // Vérifier la géolocalisation si active
     let distanceM = null;
     if (gpsLat && gpsLng && rayonMetres) {
       if (!latitude || !longitude)
         return res.status(400).json({ error: 'Position GPS requise pour cette session' });
 
-      // Calcul distance Haversine
       const R    = 6371000;
       const dLat = (latitude  - gpsLat) * Math.PI / 180;
       const dLon = (longitude - gpsLng) * Math.PI / 180;
@@ -551,10 +566,10 @@ app.post('/presence/confirmer', auth, requireRole('etudiant'), async (req, res) 
 
       if (distanceM > rayonMetres)
         return res.status(403).json({
-          error:     `Vous êtes trop loin (${distanceM}m, rayon max: ${rayonMetres}m)`,
-          code:      'HORS_ZONE',
-          distance:  distanceM,
-          rayon:     rayonMetres,
+          error:    `Vous êtes trop loin (${distanceM}m, rayon max: ${rayonMetres}m)`,
+          code:     'HORS_ZONE',
+          distance: distanceM,
+          rayon:    rayonMetres,
         });
     }
 
@@ -573,7 +588,8 @@ app.post('/presence/confirmer', auth, requireRole('etudiant'), async (req, res) 
         methode:     'code',
         etudiantLat: latitude  || null,
         etudiantLng: longitude || null,
-        distanceM:   distanceM,
+        distanceM,
+        deviceId:    deviceId  || null, // ✅ stocker le device ID
       },
     });
 

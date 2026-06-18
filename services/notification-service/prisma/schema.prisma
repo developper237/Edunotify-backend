@@ -196,10 +196,24 @@ model Notification {
   estSondage      Boolean        @default(false)
   createdAt       DateTime       @default(now())
 
-  expediteur    User                       @relation("NotifExpediteur", fields: [expediteurId], references: [id])
-  etablissement Etablissement?             @relation(fields: [etablissementId], references: [id])
-  destinataires NotificationDestinataire[]
-  choixSondage  ChoixSondage[]
+  expediteur       User                       @relation("NotifExpediteur", fields: [expediteurId], references: [id])
+  etablissement    Etablissement?             @relation(fields: [etablissementId], references: [id])
+  destinataires    NotificationDestinataire[]
+  questionsSondage QuestionSondage[]
+  choixSondage     ChoixSondage[]             @relation("NotificationChoix")
+}
+
+model QuestionSondage {
+  id             String @id @default(cuid())
+  notificationId String
+  texte          String
+  ordre          Int     @default(0)
+  obligatoire    Boolean @default(false)
+
+  notification Notification   @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  choixSondage ChoixSondage[] @relation("QuestionChoix")
+
+  @@index([notificationId, ordre])
 }
 
 model NotificationDestinataire {
@@ -217,12 +231,16 @@ model NotificationDestinataire {
 
 model ChoixSondage {
   id             String @id @default(cuid())
+  questionId     String
   notificationId String
   texte          String
   ordre          Int    @default(0)
 
-  notification Notification  @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  question     QuestionSondage @relation("QuestionChoix", fields: [questionId], references: [id], onDelete: Cascade)
+  notification Notification    @relation("NotificationChoix", fields: [notificationId], references: [id], onDelete: Cascade)
   votes        VoteSondage[]
+
+  @@index([questionId, ordre])
 }
 
 model VoteSondage {

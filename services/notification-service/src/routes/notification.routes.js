@@ -32,9 +32,31 @@ router.post('/sondage',
   authenticate,
   requireRole('delegue', 'chef_departement', 'admin', 'super_admin'),
   [
-    body('question').notEmpty().trim(),
-    body('choix').isArray({ min: 2, max: 4 }),
-    body('destinataires').notEmpty(),
+    body('question').optional().trim(),
+    body('choix').optional().isArray({ min: 2, max: 4 }),
+    body('questions').optional().isArray({ min: 1 }),
+    body('questions.*.question').optional().trim().notEmpty(),
+    body('questions.*.choix').optional().isArray({ min: 2, max: 4 }),
+    body('destinataires').optional().notEmpty(),
+    body('cible').optional().notEmpty(),
+    body().custom((value) => {
+      const hasLegacyFormat = Boolean(
+        value.question && Array.isArray(value.choix) && value.choix.length >= 2
+      );
+      const hasQuestionsFormat = Array.isArray(value.questions) && value.questions.length > 0
+        && value.questions.every((item) =>
+          typeof item?.question === 'string'
+          && item.question.trim().length > 0
+          && Array.isArray(item.choix)
+          && item.choix.length >= 2
+        );
+
+      if (!hasLegacyFormat && !hasQuestionsFormat) {
+        throw new Error('Fournissez question/choix ou questions[] avec au moins 2 choix par question');
+      }
+
+      return true;
+    }),
   ],
   NotifController.lancerSondage
 );

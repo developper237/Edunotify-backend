@@ -18,6 +18,7 @@ app.use(cors());
 app.use(morgan('dev'));
 app.use(express.json());
 
+
 const upload = multer({ storage: multer.memoryStorage() });
 
 const mailer = nodemailer.createTransport({
@@ -466,32 +467,59 @@ app.get('/academic/publications/:id/bulletin',
     try {
       const publication = await prisma.publicationNotes.findUnique({
         where: { id: req.params.id },
+        include: { classe: true },
       });
-      if (!publication) return res.status(404).json({ error: 'Publication introuvable' });
+      if (!publication)
+        return res.status(404).json({ error: 'Publication introuvable' });
 
       const etudiant = await prisma.user.findUnique({
         where:   { id: req.user.id },
         include: { classeEtudiant: true },
       });
 
-      const notes = await prisma.note.findMany({
-        where:   { publicationId: req.params.id, etudiantId: req.user.id, publiee: true },
-        include: { matiere: true },
-        orderBy: { matiere: { nom: 'asc' } },
+      // ── Toutes les matières de la classe ──────────────────────
+      const matieres = await prisma.matiere.findMany({
+        where:   { classeId: publication.classeId },
+        orderBy: { nom: 'asc' },
       });
 
-      if (!notes.length) {
-        return res.json({
-          publication: { id: publication.id, titre: publication.titre, semestre: publication.semestre },
-          notes:    [],
-          moyenne:  null,
-          message:  'Aucune note pour cette publication',
-        });
-      }
+      // ── Notes publiées de cet étudiant pour cette publication ─
+      const notes = await prisma.note.findMany({
+        where:   {
+          publicationId: req.params.id,
+          etudiantId:    req.user.id,
+          publiee:       true,
+        },
+        include: { matiere: true },
+      });
 
-      const totalCoeff  = notes.reduce((s, n) => s + n.matiere.coefficient, 0);
-      const totalPoints = notes.reduce((s, n) => s + n.valeur * n.matiere.coefficient, 0);
-      const moyenne     = totalCoeff > 0 ? parseFloat((totalPoints / totalCoeff).toFixed(2)) : 0;
+      // Map matiereId → note
+      const noteMap = {};
+      for (const n of notes) noteMap[n.matiereId] = n;
+
+      // ── Construire la liste complète (avec ou sans note) ──────
+      const lignes = matieres.map(m => {
+        const note = noteMap[m.id];
+        return {
+          id:          note?.id          ?? `missing-${m.id}`,
+          matiereId:   m.id,
+          matiere:     m.nom,
+          coefficient: m.coefficient,
+          valeur:      note?.valeur      ?? null,   // null = pas de note
+          mention:     note ? getMention(note.valeur) : 'À rattraper',
+          manquante:   !note,
+        };
+      });
+
+      // ── Moyenne sur les notes existantes uniquement ───────────
+      const lignesNotees = lignes.filter(l => l.valeur !== null);
+      const totalCoeff   = lignesNotees.reduce((s, n) => s + n.coefficient, 0);
+      const totalPoints  = lignesNotees.reduce(
+        (s, n) => s + (n.valeur ?? 0) * n.coefficient, 0
+      );
+      const moyenne = totalCoeff > 0
+        ? parseFloat((totalPoints / totalCoeff).toFixed(2))
+        : null;
 
       return res.json({
         publication: {
@@ -506,19 +534,35 @@ app.get('/academic/publications/:id/bulletin',
           matricule: etudiant.matricule,
           classe:    etudiant.classeEtudiant?.codeGenere,
         },
-        notes: notes.map(n => ({
-          id:          n.id,
-          matiereId:   n.matiereId,
-          matiere:     n.matiere.nom,
-          coefficient: n.matiere.coefficient,
-          valeur:      n.valeur,
-          mention:     getMention(n.valeur),
-        })),
+        notes:   lignes,
         moyenne,
-        mention: getMention(moyenne),
-        admis:   moyenne >= 10,
+        mention: moyenne !== null ? getMention(moyenne) : null,
+        admis:   moyenne !== null ? moyenne >= 10 : false,
       });
     } catch (err) {
+      console.error('[Academic] Bulletin:', err);
+      return res.status(500).json({ error: 'Erreur serveur' });
+    }
+  }
+);
+
+// CHEF — Supprimer une publication
+app.delete('/academic/publications/:id',
+  auth, requireRole('chef_departement', 'admin'),
+  async (req, res) => {
+    try {
+      const pub = await prisma.publicationNotes.findUnique({
+        where: { id: req.params.id },
+      });
+      if (!pub) return res.status(404).json({ error: 'Publication introuvable' });
+
+      // Supprimer les notes liées puis la publication
+      await prisma.note.deleteMany({ where: { publicationId: req.params.id } });
+      await prisma.publicationNotes.delete({ where: { id: req.params.id } });
+
+      return res.json({ message: 'Publication supprimée' });
+    } catch (err) {
+      console.error('[Academic] Delete publication:', err);
       return res.status(500).json({ error: 'Erreur serveur' });
     }
   }

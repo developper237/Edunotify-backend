@@ -4,7 +4,7 @@ const express   = require('express');
 const helmet    = require('helmet');
 const cors      = require('cors');
 const morgan    = require('morgan');
-const { PrismaClient } = require('@prisma/client');
+const { PrismaClient } = require('../../../node_modules/.prisma/client');
 const { initFirebase, sendPushToOne, sendPushToMany } = require('./firebase');
 
 const app    = express();
@@ -79,6 +79,15 @@ const resolveDestinataires = async (cible, user) => {
   return prisma.user.findMany({ where, select: { id: true, fcmToken: true } });
 };
 
+// Ajoute l'expéditeur dans la liste des destinataires s'il n'y est pas
+const ajouterExpediteur = (dests, expediteurId) => {
+  const ids = new Set(dests.map(d => d.id));
+  if (!ids.has(expediteurId)) {
+    dests.push({ id: expediteurId, fcmToken: null });
+  }
+  return dests;
+};
+
 // ══════════════════════════════════════════════════════════════════
 // POST /notifications — Envoyer une notification
 // ══════════════════════════════════════════════════════════════════
@@ -98,9 +107,12 @@ app.post('/notifications', auth, async (req, res) => {
   if (req.user.role === 'delegue')          cibleEffective = 'classe';
 
   try {
-    const dests = await resolveDestinataires(cibleEffective, req.user);
+    let dests = await resolveDestinataires(cibleEffective, req.user);
     if (dests.length === 0)
       return res.status(400).json({ error: 'Aucun destinataire trouvé' });
+
+    // ← Ajouter l'expéditeur pour traçabilité
+    dests = ajouterExpediteur(dests, req.user.id);
 
     const notif = await prisma.notification.create({
       data: {
@@ -113,8 +125,10 @@ app.post('/notifications', auth, async (req, res) => {
       },
     });
 
-    // Push FCM
-    const tokens = dests.filter(d => d.fcmToken).map(d => d.fcmToken);
+    // Push FCM (sauf à l'expéditeur lui-même)
+    const tokens = dests
+      .filter(d => d.fcmToken && d.id !== req.user.id)
+      .map(d => d.fcmToken);
     if (tokens.length > 0) {
       sendPushToMany(tokens, titre, contenu, { notificationId: notif.id })
         .catch(console.error);
@@ -140,37 +154,108 @@ app.post('/notifications/sondage', auth, async (req, res) => {
   if (!allowed.includes(req.user.role))
     return res.status(403).json({ error: 'Accès refusé' });
 
-  const { question, choix, cible } = req.body;
-  if (!question || !choix || choix.length < 2)
-    return res.status(400).json({ error: 'Question et 2 choix minimum requis' });
+  const { question, choix, questions, cible, destinataires } = req.body;
+  const target = destinataires ?? cible ?? 'classe';
 
   try {
-    const dests = await resolveDestinataires(cible || 'classe', req.user);
+    const rawQuestions = Array.isArray(questions) && questions.length > 0
+      ? questions
+      : [{ question, choix }];
+
+    if (!rawQuestions.length) {
+      return res.status(400).json({ error: 'Question et 2 choix minimum requis' });
+    }
+
+    const normalizedQuestions = rawQuestions.map(item => {
+      const questionText = typeof item?.question === 'string' ? item.question.trim() : '';
+      if (!questionText) throw new Error('Chaque question doit avoir un texte');
+
+      const options = Array.isArray(item?.choix) ? item.choix : [];
+      if (options.length < 2) throw new Error('Chaque question doit contenir au moins 2 choix');
+
+      return {
+        question:    questionText,
+        obligatoire: Boolean(item?.obligatoire === true || item?.required === true),
+        choix:       options
+          .map((texte, i) => ({ texte: String(texte).trim(), ordre: i }))
+          .filter(option => option.texte.length > 0),
+      };
+    });
+
+    let dests = await resolveDestinataires(target, req.user);
+    if (dests.length === 0)
+      return res.status(400).json({ error: 'Aucun destinataire trouvé' });
+
+    // ← Ajouter l'expéditeur pour qu'il voie son propre sondage
+    dests = ajouterExpediteur(dests, req.user.id);
 
     const notif = await prisma.notification.create({
       data: {
-        titre:        `📊 ${question}`,
-        contenu:      question,
+        titre: normalizedQuestions.length === 1
+          ? `${normalizedQuestions[0].question}`
+          : 'Sondage multi-questions',
+        contenu: normalizedQuestions.length === 1
+          ? normalizedQuestions[0].question
+          : normalizedQuestions.map(item => item.question).join(' • '),
         categorie:    'administratif',
         urgence:      false,
         estSondage:   true,
         expediteurId: req.user.id,
-        choixSondage: { create: choix.map((texte, i) => ({ texte, ordre: i })) },
         destinataires: { create: dests.map(d => ({ userId: d.id })) },
       },
-      include: { choixSondage: true },
     });
 
-    const tokens = dests.filter(d => d.fcmToken).map(d => d.fcmToken);
+    for (const [qIndex, item] of normalizedQuestions.entries()) {
+      const q = await prisma.questionSondage.create({
+        data: {
+          notificationId: notif.id,
+          texte:          item.question,
+          ordre:          qIndex,
+          obligatoire:    item.obligatoire ?? false,
+        },
+      });
+
+      for (const [choiceIndex, option] of item.choix.entries()) {
+        await prisma.choixSondage.create({
+          data: {
+            questionId:     q.id,
+            notificationId: notif.id,
+            texte:          option.texte,
+            ordre:          option.ordre ?? choiceIndex,
+          },
+        });
+      }
+    }
+
+    const fullNotif = await prisma.notification.findUnique({
+      where:   { id: notif.id },
+      include: { questionsSondage: { include: { choixSondage: true } } },
+    });
+
+    // Push FCM (sauf à l'expéditeur)
+    const tokens = dests
+      .filter(d => d.fcmToken && d.id !== req.user.id)
+      .map(d => d.fcmToken);
     if (tokens.length > 0) {
-      sendPushToMany(tokens, '📊 Sondage', question, { notificationId: notif.id })
-        .catch(console.error);
+      sendPushToMany(
+        tokens,
+        'Sondage',
+        normalizedQuestions.map(item => item.question).join(' • '),
+        { notificationId: notif.id }
+      ).catch(console.error);
     }
 
     return res.status(201).json({
-      message:        `Sondage envoyé à ${dests.length} destinataire(s)`,
-      notificationId: notif.id,
-      choix:          notif.choixSondage,
+      message:         `Sondage envoyé à ${dests.length} destinataire(s)`,
+      notificationId:  fullNotif.id,
+      questions:       fullNotif.questionsSondage.map(q => ({
+        id:          q.id,
+        question:    q.texte,
+        obligatoire: q.obligatoire ?? false,
+        choix:       q.choixSondage,
+      })),
+      choix:           fullNotif.questionsSondage.flatMap(q => q.choixSondage),
+      nbDestinataires: dests.length,
     });
   } catch (err) {
     console.error('[Notifications] Sondage:', err);
@@ -203,19 +288,24 @@ app.get('/notifications/mes-notifications', auth, async (req, res) => {
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
     const whereDestinataire = { userId: req.user.id };
-    const notifFilter = {};
 
     const [total, items] = await Promise.all([
-      prisma.notificationDestinataire.count({
-        where: { ...whereDestinataire, ...notifFilter },
-      }),
+      prisma.notificationDestinataire.count({ where: whereDestinataire }),
       prisma.notificationDestinataire.findMany({
-        where: { ...whereDestinataire, ...notifFilter },
+        where:   whereDestinataire,
         include: {
           notification: {
             include: {
-              expediteur:   { select: { nom: true, prenom: true, role: true } },
-              choixSondage: { include: { _count: { select: { votes: true } } } },
+              expediteur: { select: { nom: true, prenom: true, role: true } },
+              questionsSondage: {
+                orderBy: { ordre: 'asc' },
+                include: {
+                  choixSondage: {
+                    orderBy: { ordre: 'asc' },
+                    include: { _count: { select: { votes: true } } },
+                  },
+                },
+              },
             },
           },
         },
@@ -225,26 +315,76 @@ app.get('/notifications/mes-notifications', auth, async (req, res) => {
       }),
     ]);
 
+    // Pour chaque sondage, vérifier si l'utilisateur est l'expéditeur
+    // → dans ce cas il voit les résultats sans avoir voté
+    const notifIds = items
+      .filter(item => item.notification.estSondage)
+      .map(item => item.notification.id);
+
+    // Récupérer les votes de l'utilisateur sur ces sondages
+    const votesUtilisateur = notifIds.length > 0
+      ? await prisma.voteSondage.findMany({
+          where: {
+            userId:  req.user.id,
+            choixId: {
+              in: (await prisma.choixSondage.findMany({
+                where:  { notificationId: { in: notifIds } },
+                select: { id: true },
+              })).map(c => c.id),
+            },
+          },
+          select: { choixId: true },
+        })
+      : [];
+
+    const choixVotes = new Set(votesUtilisateur.map(v => v.choixId));
+
     return res.json({
       total,
       page: parseInt(page),
-      notifs: items.map(item => ({
-        id:  item.id,
-        lue: item.lue,
-        notification: {
-          id:         item.notification.id,
-          titre:      item.notification.titre,
-          contenu:    item.notification.contenu,
-          categorie:  item.notification.categorie,
-          urgence:    item.notification.urgence,
-          estSondage: item.notification.estSondage,
-          createdAt:  item.notification.createdAt,
-          expediteur: `${item.notification.expediteur.prenom} ${item.notification.expediteur.nom}`,
-          choixSondage: item.notification.choixSondage.map(c => ({
-            id: c.id, texte: c.texte, votes: c._count.votes,
-          })),
-        },
-      })),
+      notifications: items.map(item => {
+        const notif       = item.notification;
+        const estExpediteur = notif.expediteurId === req.user.id;
+
+        return {
+          id:  item.id,
+          lue: item.lue,
+          notification: {
+            id:          notif.id,
+            titre:       notif.titre,
+            contenu:     notif.contenu,
+            categorie:   notif.categorie,
+            urgence:     notif.urgence,
+            estSondage:  notif.estSondage,
+            createdAt:   notif.createdAt,
+            expediteur:  `${notif.expediteur.prenom} ${notif.expediteur.nom}`,
+            estExpediteur, // ← indique au Flutter si c'est l'auteur du sondage
+            questionsSondage: (notif.questionsSondage ?? []).map(q => {
+              const totalQ = q.choixSondage.reduce(
+                (s, c) => s + (c._count?.votes ?? 0), 0
+              );
+              return {
+                id:          q.id,
+                texte:       q.texte,
+                ordre:       q.ordre,
+                obligatoire: q.obligatoire ?? false,
+                choixSondage: (q.choixSondage ?? []).map(c => ({
+                  id:          c.id,
+                  texte:       c.texte,
+                  questionId:  c.questionId,
+                  ordre:       c.ordre,
+                  votes:       c._count?.votes ?? 0,
+                  pourcentage: totalQ > 0
+                    ? Math.round(((c._count?.votes ?? 0) / totalQ) * 100)
+                    : 0,
+                  // ← indique si l'utilisateur a voté pour ce choix
+                  aVote: choixVotes.has(c.id),
+                })),
+              };
+            }),
+          },
+        };
+      }),
     });
   } catch (err) {
     console.error('[Notifications] MesNotifs:', err);
@@ -273,8 +413,11 @@ app.put('/notifications/:id/lire', auth, async (req, res) => {
 // ══════════════════════════════════════════════════════════════════
 
 app.post('/notifications/sondage/:notifId/voter', auth, async (req, res) => {
-  const { choixId } = req.body;
-  if (!choixId) return res.status(400).json({ error: 'choixId requis' });
+  const { choixId, choixIds } = req.body;
+  const tousLesChoix = choixIds ?? (choixId ? [choixId] : []);
+
+  if (tousLesChoix.length === 0)
+    return res.status(400).json({ error: 'choixId(s) requis' });
 
   try {
     const dest = await prisma.notificationDestinataire.findFirst({
@@ -282,34 +425,78 @@ app.post('/notifications/sondage/:notifId/voter', auth, async (req, res) => {
     });
     if (!dest) return res.status(403).json({ error: 'Non destinataire' });
 
+    // ← L'expéditeur peut voir les résultats sans voter
+    const notif = await prisma.notification.findUnique({
+      where:  { id: req.params.notifId },
+      select: { expediteurId: true },
+    });
+    if (notif?.expediteurId === req.user.id) {
+      return res.status(403).json({
+        error: 'En tant qu\'auteur du sondage, vous pouvez voir les résultats sans voter',
+      });
+    }
+
+    // Vérifier si déjà voté
     const existingVote = await prisma.voteSondage.findFirst({
-      where: { userId: req.user.id, choix: { notificationId: req.params.notifId } },
+      where: { userId: req.user.id, choixId: { in: tousLesChoix } },
     });
     if (existingVote) return res.status(409).json({ error: 'Déjà voté' });
 
-    await prisma.voteSondage.create({ data: { choixId, userId: req.user.id } });
+    await prisma.voteSondage.createMany({
+      data:           tousLesChoix.map(cId => ({ choixId: cId, userId: req.user.id })),
+      skipDuplicates: true,
+    });
 
     await prisma.notificationDestinataire.updateMany({
       where: { notificationId: req.params.notifId, userId: req.user.id },
       data:  { lue: true, lueLe: new Date() },
     });
 
-    const choix      = await prisma.choixSondage.findMany({
+    // Retourner les résultats
+    const questions = await prisma.questionSondage.findMany({
       where:   { notificationId: req.params.notifId },
-      include: { _count: { select: { votes: true } } },
+      orderBy: { ordre: 'asc' },
+      include: {
+        choixSondage: {
+          orderBy: { ordre: 'asc' },
+          include: { _count: { select: { votes: true } } },
+        },
+      },
     });
-    const totalVotes = choix.reduce((sum, c) => sum + c._count.votes, 0);
 
     return res.json({
-      message: 'Vote enregistré',
-      resultats: choix.map(c => ({
-        id:          c.id,
-        texte:       c.texte,
-        votes:       c._count.votes,
-        pourcentage: totalVotes > 0
-          ? Math.round((c._count.votes / totalVotes) * 100)
-          : 0,
-      })),
+      message:   'Vote enregistré',
+      questions: questions.map(q => {
+        const totalQ = q.choixSondage.reduce((s, c) => s + c._count.votes, 0);
+        return {
+          id:    q.id,
+          texte: q.texte,
+          ordre: q.ordre,
+          choixSondage: q.choixSondage.map(c => ({
+            id:          c.id,
+            texte:       c.texte,
+            questionId:  c.questionId,
+            ordre:       c.ordre,
+            votes:       c._count.votes,
+            pourcentage: totalQ > 0
+              ? Math.round((c._count.votes / totalQ) * 100)
+              : 0,
+          })),
+        };
+      }),
+      // Rétrocompat — liste plate
+      resultats: questions.flatMap(q => {
+        const totalQ = q.choixSondage.reduce((s, c) => s + c._count.votes, 0);
+        return q.choixSondage.map(c => ({
+          id:          c.id,
+          texte:       c.texte,
+          questionId:  c.questionId,
+          votes:       c._count.votes,
+          pourcentage: totalQ > 0
+            ? Math.round((c._count.votes / totalQ) * 100)
+            : 0,
+        }));
+      }),
     });
   } catch (err) {
     console.error('[Notifications] Voter:', err);
@@ -327,6 +514,9 @@ app.post('/notifications/interne', async (req, res) => {
     return res.status(400).json({ error: 'Données manquantes' });
 
   try {
+    // Ajouter l'expéditeur s'il n'est pas déjà destinataire
+    const tousIds = [...new Set([...destinataires, expediteurId].filter(Boolean))];
+
     const notif = await prisma.notification.create({
       data: {
         titre,
@@ -334,16 +524,13 @@ app.post('/notifications/interne', async (req, res) => {
         categorie:    categorie || 'administratif',
         urgence:      false,
         estSondage:   false,
-        expediteurId: expediteurId || destinataires[0], // fallback
-        destinataires: {
-          create: destinataires.map(userId => ({ userId })),
-        },
+        expediteurId: expediteurId || destinataires[0],
+        destinataires: { create: tousIds.map(userId => ({ userId })) },
       },
     });
 
-    // Push FCM aux destinataires
     const users = await prisma.user.findMany({
-      where:  { id: { in: destinataires } },
+      where:  { id: { in: destinataires } }, // push seulement aux vrais destinataires
       select: { fcmToken: true },
     });
     const tokens = users.filter(u => u.fcmToken).map(u => u.fcmToken);
