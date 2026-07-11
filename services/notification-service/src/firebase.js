@@ -43,24 +43,41 @@ const sendPushToMany = async (tokens, titre, contenu, data = {}) => {
   if (!validTokens.length) return;
 
   try {
-    const response = await messaging.sendEach(
-      validTokens.map(token => ({
-        token,
-        notification: { title: titre, body: contenu },
-        data: Object.fromEntries(
-          Object.entries(data).map(([k, v]) => [k, String(v)])
-        ),
-        android: {
-          priority: 'high',
-          notification: { sound: 'default', channelId: 'edunotify_default' },
-        },
-      }))
-    );
-    console.log('[Firebase] OK:', response.successCount, '/ Echecs:', response.failureCount);
+    // sendMulticast envoie en une seule requête HTTP — évite les ECONNRESET
+    const message = {
+      tokens: validTokens,
+      notification: { title: titre, body: contenu },
+      data: Object.fromEntries(
+        Object.entries(data).map(([k, v]) => [k, String(v)])
+      ),
+      android: {
+        priority: 'high',
+        notification: { sound: 'default', channelId: 'edunotify_default' },
+      },
+    };
+
+    const response = await messaging.sendEachForMulticast(message);
+    console.log(`[Firebase] OK: ${response.successCount} / Echecs: ${response.failureCount}`);
+
+    // Nettoyer les tokens invalides
+    if (response.failureCount > 0) {
+      response.responses.forEach((resp, idx) => {
+        if (!resp.success) {
+          console.warn(`[Firebase] Token invalide: ${validTokens[idx].substring(0, 20)}... — ${resp.error?.message}`);
+        }
+      });
+    }
   } catch (err) {
-    console.error('[Firebase] sendEach erreur:', err.message);
+    console.error('[Firebase] sendEachForMulticast erreur:', err.message);
+
+    // Fallback : envoi séquentiel avec délai si multicast échoue
+    for (const token of validTokens) {
+      try {
+        await sendPushToOne(token, titre, contenu, data);
+        await new Promise(r => setTimeout(r, 100)); // 100ms entre chaque
+      } catch (_) {}
+    }
   }
 };
-
 module.exports = { initFirebase, sendPushToOne, sendPushToMany };
 

@@ -1,5 +1,3 @@
-// services/academic-service/src/index.js
-
 const express    = require('express');
 const helmet     = require('helmet');
 const cors       = require('cors');
@@ -17,7 +15,6 @@ app.use(helmet());
 app.use(cors());
 app.use(morgan('dev'));
 app.use(express.json());
-
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -42,7 +39,9 @@ const auth = (req, res, next) => {
 };
 
 const requireRole = (...roles) => (req, res, next) => {
-  if (!roles.includes(req.user.role))
+  // Permet de gérer à la fois requireRole('admin') et requireRole(['role1', 'role2'])
+  const flattenedRoles = roles.flat();
+  if (!flattenedRoles.includes(req.user.role))
     return res.status(403).json({ error: 'Accès refusé' });
   next();
 };
@@ -118,13 +117,6 @@ app.post('/academic/import/preview',
 // ══════════════════════════════════════════════════════════════════
 // CHEF — Import + création d'une publication
 // ══════════════════════════════════════════════════════════════════
-//
-// Body (multipart) :
-//   fichier    : fichier Excel
-//   classeId   : id de la classe
-//   titre      : "Résultats examens session normale S1"
-//   semestre   : "Semestre 1" | "Semestre 2"
-//   publier    : "true" | "false"
 
 app.post('/academic/import',
   auth, requireRole('chef_departement', 'admin'), upload.single('fichier'),
@@ -146,7 +138,6 @@ app.post('/academic/import',
       const colonnesMat   = Object.keys(rows[0]).filter(c => !COLONNES_FIXES.includes(c));
       const resultats     = { importees: 0, erreurs: [] };
 
-      // ── Créer la publication ────────────────────────────────────
       const publication = await prisma.publicationNotes.create({
         data: {
           titre,
@@ -157,7 +148,6 @@ app.post('/academic/import',
       });
 
       for (const nomMatiere of colonnesMat) {
-        // Créer ou récupérer la matière avec departementId
         let matiere = await prisma.matiere.findFirst({
           where: { nom: nomMatiere, classeId },
         });
@@ -193,8 +183,6 @@ app.post('/academic/import',
             continue;
           }
 
-          // Créer la note liée à cette publication
-          // Pas de contrainte unique — plusieurs sessions possibles
           await prisma.note.create({
             data: {
               matiereId:     matiere.id,
@@ -237,7 +225,6 @@ app.post('/academic/publications/:id/publier',
       });
       if (!pub) return res.status(404).json({ error: 'Publication introuvable' });
 
-      // Corriger departementId au passage
       const chef = await prisma.user.findUnique({ where: { id: req.user.id } });
       if (chef?.departementId) {
         await prisma.matiere.updateMany({
@@ -258,6 +245,35 @@ app.post('/academic/publications/:id/publier',
       });
     } catch (err) {
       return res.status(500).json({ error: 'Erreur serveur' });
+    }
+  }
+);
+// ══════════════════════════════════════════════════════════════════
+// CHEF — Supprimer une publication
+// ══════════════════════════════════════════════════════════════════
+
+app.delete('/academic/publications/:id',
+  auth, requireRole('chef_departement', 'admin'),
+  async (req, res) => {
+    try {
+      const pub = await prisma.publicationNotes.findUnique({
+        where: { id: req.params.id },
+      });
+      if (!pub) return res.status(404).json({ error: 'Publication introuvable' });
+
+      // Supprimer d'abord les notes liées (cascade manuelle si pas définie)
+      await prisma.note.deleteMany({
+        where: { publicationId: req.params.id },
+      });
+
+      await prisma.publicationNotes.delete({
+        where: { id: req.params.id },
+      });
+
+      return res.json({ message: 'Publication supprimée avec succès' });
+    } catch (err) {
+      console.error('[Academic] Supprimer publication:', err);
+      return res.status(500).json({ error: 'Erreur serveur : ' + err.message });
     }
   }
 );
@@ -395,11 +411,11 @@ app.patch('/academic/requetes/:id',
 );
 
 // ══════════════════════════════════════════════════════════════════
-// ÉTUDIANT — Liste des publications de sa classe
+// ÉTUDIANT & DÉLÉGUÉ — Liste des publications de sa classe
 // ══════════════════════════════════════════════════════════════════
 
 app.get('/academic/mes-publications',
-  auth, requireRole('etudiant'),
+  auth, requireRole(['etudiant', 'delegue']), // 💡 AJOUTÉ : 'delegue'
   async (req, res) => {
     try {
       const etudiant = await prisma.user.findUnique({
@@ -427,7 +443,6 @@ app.get('/academic/mes-publications',
         orderBy: { publieLe: 'desc' },
       });
 
-      // Pour chaque publication, calculer la moyenne de l'étudiant
       const result = await Promise.all(publications.map(async p => {
         const notes = await prisma.note.findMany({
           where:   { publicationId: p.id, etudiantId: req.user.id, publiee: true },
@@ -458,11 +473,11 @@ app.get('/academic/mes-publications',
 );
 
 // ══════════════════════════════════════════════════════════════════
-// ÉTUDIANT — Détail d'une publication (ses notes)
+// ÉTUDIANT & DÉLÉGUÉ — Détail d'une publication (ses notes)
 // ══════════════════════════════════════════════════════════════════
 
 app.get('/academic/publications/:id/bulletin',
-  auth, requireRole('etudiant'),
+  auth, requireRole(['etudiant', 'delegue']), // 💡 AJOUTÉ : 'delegue'
   async (req, res) => {
     try {
       const publication = await prisma.publicationNotes.findUnique({
@@ -477,13 +492,11 @@ app.get('/academic/publications/:id/bulletin',
         include: { classeEtudiant: true },
       });
 
-      // ── Toutes les matières de la classe ──────────────────────
       const matieres = await prisma.matiere.findMany({
         where:   { classeId: publication.classeId },
         orderBy: { nom: 'asc' },
       });
 
-      // ── Notes publiées de cet étudiant pour cette publication ─
       const notes = await prisma.note.findMany({
         where:   {
           publicationId: req.params.id,
@@ -493,11 +506,9 @@ app.get('/academic/publications/:id/bulletin',
         include: { matiere: true },
       });
 
-      // Map matiereId → note
       const noteMap = {};
       for (const n of notes) noteMap[n.matiereId] = n;
 
-      // ── Construire la liste complète (avec ou sans note) ──────
       const lignes = matieres.map(m => {
         const note = noteMap[m.id];
         return {
@@ -505,13 +516,12 @@ app.get('/academic/publications/:id/bulletin',
           matiereId:   m.id,
           matiere:     m.nom,
           coefficient: m.coefficient,
-          valeur:      note?.valeur      ?? null,   // null = pas de note
+          valeur:      note?.valeur      ?? null,
           mention:     note ? getMention(note.valeur) : 'À rattraper',
           manquante:   !note,
         };
       });
 
-      // ── Moyenne sur les notes existantes uniquement ───────────
       const lignesNotees = lignes.filter(l => l.valeur !== null);
       const totalCoeff   = lignesNotees.reduce((s, n) => s + n.coefficient, 0);
       const totalPoints  = lignesNotees.reduce(
@@ -546,34 +556,12 @@ app.get('/academic/publications/:id/bulletin',
   }
 );
 
-// CHEF — Supprimer une publication
-app.delete('/academic/publications/:id',
-  auth, requireRole('chef_departement', 'admin'),
-  async (req, res) => {
-    try {
-      const pub = await prisma.publicationNotes.findUnique({
-        where: { id: req.params.id },
-      });
-      if (!pub) return res.status(404).json({ error: 'Publication introuvable' });
-
-      // Supprimer les notes liées puis la publication
-      await prisma.note.deleteMany({ where: { publicationId: req.params.id } });
-      await prisma.publicationNotes.delete({ where: { id: req.params.id } });
-
-      return res.json({ message: 'Publication supprimée' });
-    } catch (err) {
-      console.error('[Academic] Delete publication:', err);
-      return res.status(500).json({ error: 'Erreur serveur' });
-    }
-  }
-);
-
 // ══════════════════════════════════════════════════════════════════
-// ÉTUDIANT — Badge : nouvelles publications depuis une date
+// ÉTUDIANT & DÉLÉGUÉ — Badge : nouvelles publications depuis une date
 // ══════════════════════════════════════════════════════════════════
 
 app.get('/academic/badge',
-  auth, requireRole('etudiant'),
+  auth, requireRole(['etudiant', 'delegue']), // 💡 AJOUTÉ : 'delegue'
   async (req, res) => {
     try {
       const etudiant = await prisma.user.findUnique({ where: { id: req.user.id } });
@@ -597,11 +585,11 @@ app.get('/academic/badge',
 );
 
 // ══════════════════════════════════════════════════════════════════
-// ÉTUDIANT — Soumettre une requête
+// ÉTUDIANT & DÉLÉGUÉ — Soumettre une requête
 // ══════════════════════════════════════════════════════════════════
 
 app.post('/academic/requetes',
-  auth, requireRole('etudiant'),
+  auth, requireRole(['etudiant', 'delegue']), // 💡 AJOUTÉ : 'delegue'
   async (req, res) => {
     const { noteId, motif } = req.body;
     if (!noteId || !motif)
@@ -614,7 +602,7 @@ app.post('/academic/requetes',
         where: { id: noteId }, include: { matiere: true },
       });
 
-      if (!note)                        return res.status(404).json({ error: 'Note introuvable' });
+      if (!note)                    return res.status(404).json({ error: 'Note introuvable' });
       if (note.etudiantId !== req.user.id) return res.status(403).json({ error: 'Note inaccessible' });
       if (!note.publiee)                return res.status(400).json({ error: 'Note non publiée' });
 
@@ -642,11 +630,11 @@ app.post('/academic/requetes',
 );
 
 // ══════════════════════════════════════════════════════════════════
-// ÉTUDIANT — Ses requêtes
+// ÉTUDIANT & DÉLÉGUÉ — Ses requêtes
 // ══════════════════════════════════════════════════════════════════
 
 app.get('/academic/requetes/mes-requetes',
-  auth, requireRole('etudiant'),
+  auth, requireRole(['etudiant', 'delegue']), // 💡 AJOUTÉ : 'delegue'
   async (req, res) => {
     try {
       const requetes = await prisma.requeteNote.findMany({
@@ -669,19 +657,29 @@ app.get('/academic/requetes/mes-requetes',
 );
 
 // ══════════════════════════════════════════════════════════════════
-// COMMUN — Classes groupées par filière (chef)
+// COMMUN — Classes groupées par filière (chef, admin & délégué)
 // ══════════════════════════════════════════════════════════════════
 
 app.get('/academic/mes-classes',
-  auth, requireRole('chef_departement', 'admin'),
+  auth, requireRole(['chef_departement', 'admin', 'delegue']), // 💡 AJOUTÉ : 'delegue' pour qu'il puisse voir sa structure de classe
   async (req, res) => {
     try {
-      const chef = await prisma.user.findUnique({ where: { id: req.user.id } });
-      if (!chef?.departementId)
-        return res.status(400).json({ error: 'Département non trouvé' });
+      const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+      
+      // Si c'est un délégué, on prend le département rattaché à sa classe d'étude
+      let departementId = user?.departementId;
+      if (!departementId && req.user.role === 'delegue') {
+        const classeDelegue = await prisma.classe.findUnique({
+          where: { id: user?.classeEtudiantId }
+        });
+        departementId = classeDelegue?.departementId;
+      }
+
+      if (!departementId)
+        return res.status(400).json({ error: 'Département non trouvé ou non rattaché' });
 
       const classes = await prisma.classe.findMany({
-        where:   { departementId: chef.departementId },
+        where:   { departementId: departementId },
         include: { _count: { select: { etudiants: true, matieres: true } } },
         orderBy: [{ filiere: 'asc' }, { niveau: 'asc' }],
       });

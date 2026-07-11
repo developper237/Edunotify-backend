@@ -154,16 +154,23 @@ app.post('/notifications/sondage', auth, async (req, res) => {
   if (!allowed.includes(req.user.role))
     return res.status(403).json({ error: 'Accès refusé' });
 
-  const { question, choix, questions, cible, destinataires } = req.body;
+  // 1. Récupération du 'titre' depuis le body
+  const { titre, questions, cible, destinataires } = req.body;
   const target = destinataires ?? cible ?? 'classe';
 
+  // 2. Validation du titre
+  if (!titre || !titre.trim()) {
+    return res.status(400).json({ error: 'L\'objet du sondage est requis' });
+  }
+
   try {
+    // Validation et normalisation des questions (existant)
     const rawQuestions = Array.isArray(questions) && questions.length > 0
       ? questions
-      : [{ question, choix }];
+      : []; // On force l'usage du tableau questions envoyé par Flutter
 
-    if (!rawQuestions.length) {
-      return res.status(400).json({ error: 'Question et 2 choix minimum requis' });
+    if (rawQuestions.length === 0) {
+      return res.status(400).json({ error: 'Au moins une question est requise' });
     }
 
     const normalizedQuestions = rawQuestions.map(item => {
@@ -186,17 +193,13 @@ app.post('/notifications/sondage', auth, async (req, res) => {
     if (dests.length === 0)
       return res.status(400).json({ error: 'Aucun destinataire trouvé' });
 
-    // ← Ajouter l'expéditeur pour qu'il voie son propre sondage
     dests = ajouterExpediteur(dests, req.user.id);
 
+    // 3. Utilisation du TITRE envoyé par l'utilisateur
     const notif = await prisma.notification.create({
       data: {
-        titre: normalizedQuestions.length === 1
-          ? `${normalizedQuestions[0].question}`
-          : 'Sondage multi-questions',
-        contenu: normalizedQuestions.length === 1
-          ? normalizedQuestions[0].question
-          : normalizedQuestions.map(item => item.question).join(' • '),
+        titre:     ` ${titre.trim()}`, // Titre personnalisé
+        contenu:   normalizedQuestions.map(item => item.question).join(' • '),
         categorie:    'administratif',
         urgence:      false,
         estSondage:   true,
@@ -205,6 +208,7 @@ app.post('/notifications/sondage', auth, async (req, res) => {
       },
     });
 
+    // Insertion des questions et choix (existant)
     for (const [qIndex, item] of normalizedQuestions.entries()) {
       const q = await prisma.questionSondage.create({
         data: {
@@ -232,34 +236,15 @@ app.post('/notifications/sondage', auth, async (req, res) => {
       include: { questionsSondage: { include: { choixSondage: true } } },
     });
 
-    // Push FCM (sauf à l'expéditeur)
-    const tokens = dests
-      .filter(d => d.fcmToken && d.id !== req.user.id)
-      .map(d => d.fcmToken);
-    if (tokens.length > 0) {
-      sendPushToMany(
-        tokens,
-        'Sondage',
-        normalizedQuestions.map(item => item.question).join(' • '),
-        { notificationId: notif.id }
-      ).catch(console.error);
-    }
-
-    return res.status(201).json({
-      message:         `Sondage envoyé à ${dests.length} destinataire(s)`,
-      notificationId:  fullNotif.id,
-      questions:       fullNotif.questionsSondage.map(q => ({
-        id:          q.id,
-        question:    q.texte,
-        obligatoire: q.obligatoire ?? false,
-        choix:       q.choixSondage,
-      })),
-      choix:           fullNotif.questionsSondage.flatMap(q => q.choixSondage),
-      nbDestinataires: dests.length,
+    res.status(201).json({ 
+      message: 'Sondage envoyé', 
+      notification: fullNotif,
+      nbDestinataires: dests.length 
     });
-  } catch (err) {
-    console.error('[Notifications] Sondage:', err);
-    return res.status(500).json({ error: 'Erreur serveur' });
+
+  } catch (error) {
+    console.error(error);
+    res.status(400).json({ error: error.message || 'Erreur lors de la création du sondage' });
   }
 });
 
@@ -297,6 +282,8 @@ app.get('/notifications/mes-notifications', auth, async (req, res) => {
           notification: {
             include: {
               expediteur: { select: { nom: true, prenom: true, role: true } },
+              // CORRECTION ICI : On ne peut pas utiliser 'item' ici. 
+              // Prisma inclura l'expediteurId automatiquement car c'est une clé étrangère.
               questionsSondage: {
                 orderBy: { ordre: 'asc' },
                 include: {
@@ -315,8 +302,7 @@ app.get('/notifications/mes-notifications', auth, async (req, res) => {
       }),
     ]);
 
-    // Pour chaque sondage, vérifier si l'utilisateur est l'expéditeur
-    // → dans ce cas il voit les résultats sans avoir voté
+
     const notifIds = items
       .filter(item => item.notification.estSondage)
       .map(item => item.notification.id);
@@ -326,12 +312,9 @@ app.get('/notifications/mes-notifications', auth, async (req, res) => {
       ? await prisma.voteSondage.findMany({
           where: {
             userId:  req.user.id,
-            choixId: {
-              in: (await prisma.choixSondage.findMany({
-                where:  { notificationId: { in: notifIds } },
-                select: { id: true },
-              })).map(c => c.id),
-            },
+            choix: {
+              notificationId: { in: notifIds }
+            }
           },
           select: { choixId: true },
         })
@@ -343,7 +326,8 @@ app.get('/notifications/mes-notifications', auth, async (req, res) => {
       total,
       page: parseInt(page),
       notifications: items.map(item => {
-        const notif       = item.notification;
+        const notif = item.notification;
+        // CORRECTION : expediteurId est disponible directement sur l'objet notif
         const estExpediteur = notif.expediteurId === req.user.id;
 
         return {
@@ -358,7 +342,8 @@ app.get('/notifications/mes-notifications', auth, async (req, res) => {
             estSondage:  notif.estSondage,
             createdAt:   notif.createdAt,
             expediteur:  `${notif.expediteur.prenom} ${notif.expediteur.nom}`,
-            estExpediteur, // ← indique au Flutter si c'est l'auteur du sondage
+            expediteurId: notif.expediteurId,
+            estExpediteur, 
             questionsSondage: (notif.questionsSondage ?? []).map(q => {
               const totalQ = q.choixSondage.reduce(
                 (s, c) => s + (c._count?.votes ?? 0), 0
@@ -377,7 +362,6 @@ app.get('/notifications/mes-notifications', auth, async (req, res) => {
                   pourcentage: totalQ > 0
                     ? Math.round(((c._count?.votes ?? 0) / totalQ) * 100)
                     : 0,
-                  // ← indique si l'utilisateur a voté pour ce choix
                   aVote: choixVotes.has(c.id),
                 })),
               };
@@ -391,6 +375,8 @@ app.get('/notifications/mes-notifications', auth, async (req, res) => {
     return res.status(500).json({ error: 'Erreur serveur' });
   }
 });
+
+// ... (reste du fichier identique)
 
 // ══════════════════════════════════════════════════════════════════
 // PUT /notifications/:id/lire — Marquer comme lue
@@ -546,6 +532,89 @@ app.post('/notifications/interne', async (req, res) => {
   }
 });
 
+app.delete('/notifications/:id', auth, async (req, res) => {
+  try {
+    await prisma.notificationDestinataire.delete({
+      where: {
+        id:     req.params.id,
+        userId: req.user.id, // sécurité : on ne peut supprimer que ses propres notifs
+      },
+    });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(404).json({ error: 'Notification introuvable' });
+  }
+});
+
+// GET /notifications/sondage/:notifId/resultats — Auteur voit les résultats
+app.get('/notifications/sondage/:notifId/resultats', auth, async (req, res) => {
+  try {
+    const notif = await prisma.notification.findUnique({
+      where:  { id: req.params.notifId },
+      select: { expediteurId: true, estSondage: true },
+    });
+
+    if (!notif) return res.status(404).json({ error: 'Sondage introuvable' });
+    if (!notif.estSondage) return res.status(400).json({ error: 'Pas un sondage' });
+
+    // Seul l'auteur peut accéder à cette route
+    if (notif.expediteurId !== req.user.id)
+      return res.status(403).json({ error: 'Accès réservé à l\'auteur' });
+
+    const questions = await prisma.questionSondage.findMany({
+      where:   { notificationId: req.params.notifId },
+      orderBy: { ordre: 'asc' },
+      include: {
+        choixSondage: {
+          orderBy: { ordre: 'asc' },
+          include: { _count: { select: { votes: true } } },
+        },
+      },
+    });
+
+    // Nombre total de participants (personnes ayant voté sur au moins 1 choix)
+    const votants = await prisma.voteSondage.findMany({
+      where:  { choix: { notificationId: req.params.notifId } },
+      select: { userId: true },
+      distinct: ['userId'],
+    });
+
+    // Nombre total de destinataires
+    const nbDestinataires = await prisma.notificationDestinataire.count({
+      where: { notificationId: req.params.notifId },
+    });
+
+    return res.json({
+      nbVotants:       votants.length,
+      nbDestinataires,
+      tauxParticipation: nbDestinataires > 0
+        ? Math.round((votants.length / nbDestinataires) * 100)
+        : 0,
+      questions: questions.map(q => {
+        const totalQ = q.choixSondage.reduce(
+          (s, c) => s + c._count.votes, 0
+        );
+        return {
+          id:    q.id,
+          texte: q.texte,
+          ordre: q.ordre,
+          choixSondage: q.choixSondage.map(c => ({
+            id:          c.id,
+            texte:       c.texte,
+            votes:       c._count.votes,
+            pourcentage: totalQ > 0
+              ? Math.round((c._count.votes / totalQ) * 100)
+              : 0,
+          })),
+        };
+      }),
+    });
+  } catch (err) {
+    console.error('[Notifications] Resultats sondage:', err);
+    return res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // ══════════════════════════════════════════════════════════════════
 // HEALTH
 // ══════════════════════════════════════════════════════════════════
@@ -565,3 +634,4 @@ const start = async () => {
 };
 
 start().catch(err => { console.error(err); process.exit(1); });
+

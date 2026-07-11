@@ -73,13 +73,59 @@ router.post('/classe',
   ],
   CascadeController.creerClasse
 );
-
-// ── Chef Dept → supprime Classe ───────────────────────────────────
-// DELETE /auth/cascade/classe/:id
+// DELETE /auth/cascade/classe/:id — Chef supprime sa classe
 router.delete('/classe/:id',
   authenticate,
   requireRole('chef_departement'),
-  CascadeController.supprimerClasse
+  async (req, res) => {
+    try {
+      const classe = await prisma.classe.findUnique({
+        where: { id: req.params.id },
+        include: { _count: { select: { etudiants: true } } },
+      });
+
+      if (!classe)
+        return res.status(404).json({ error: 'Classe introuvable' });
+
+      // Vérifier que la classe appartient bien au département du chef
+      const chef = await prisma.user.findUnique({
+        where:  { id: req.user.id },
+        select: { departementId: true },
+      });
+
+      if (classe.departementId !== chef.departementId)
+        return res.status(403).json({ error: 'Accès refusé' });
+
+      // Supprimer dans l'ordre des FK
+      await prisma.presence.deleteMany({
+        where: { session: { classeId: req.params.id } },
+      });
+      await prisma.sessionPresence.deleteMany({
+        where: { classeId: req.params.id },
+      });
+      await prisma.note.deleteMany({
+        where: { matiere: { classeId: req.params.id } },
+      });
+      await prisma.matiere.deleteMany({
+        where: { classeId: req.params.id },
+      });
+      // Détacher les étudiants et le délégué
+      await prisma.user.updateMany({
+        where: { classeEtudiantId: req.params.id },
+        data:  { classeEtudiantId: null },
+      });
+      await prisma.user.updateMany({
+        where: { classeDelegueId: req.params.id },
+        data:  { classeDelegueId: null },
+      });
+      await prisma.classe.delete({ where: { id: req.params.id } });
+
+      return res.json({ message: 'Classe supprimée' });
+    } catch (err) {
+      console.error('[Cascade] Delete classe:', err);
+      return res.status(500).json({ error: 'Erreur serveur' });
+    }
+  }
 );
 
 // ── GET listes ────────────────────────────────────────────────────

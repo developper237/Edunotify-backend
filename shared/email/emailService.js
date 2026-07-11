@@ -22,34 +22,142 @@ const baseTemplate = (content) => `
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f1f5f9; }
     .container { max-width: 600px; margin: 40px auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.08); }
-    .header { background: linear-gradient(135deg, #0B0E1C 0%, #131629 100%); padding: 32px; text-align: center; }
-    .header h1 { color: #06B6D4; font-size: 28px; font-weight: 800; letter-spacing: -0.5px; }
-    .header p { color: #94A3B8; font-size: 13px; margin-top: 4px; }
-    .body { padding: 32px; }
-    .body h2 { color: #0F172A; font-size: 20px; font-weight: 700; margin-bottom: 12px; }
-    .body p { color: #475569; font-size: 14px; line-height: 1.6; margin-bottom: 16px; }
-    .credentials { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin: 20px 0; }
-    .credentials .label { color: #94A3B8; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
-    .credentials .value { color: #0F172A; font-size: 15px; font-weight: 700; font-family: monospace; }
-    .credentials .row { margin-bottom: 14px; }
+
+    /* HEADER */
+    .header { background: linear-gradient(135deg, #0B1120 0%, #0D1526 50%, #0F1A2E 100%); padding: 36px 32px; text-align: center; }
+    .header-logo { display: inline-flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+    .header-icon { width: 48px; height: 48px; background: linear-gradient(135deg, #1E88C8, #0EA5E9); border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; font-size: 24px; }
+    .header h1 { color: #1E88C8; font-size: 26px; font-weight: 900; letter-spacing: -0.5px; }
+    .header h1 span { color: #F97316; }
+    .header-tagline { color: #64748B; font-size: 12px; margin-top: 4px; letter-spacing: 1px; text-transform: uppercase; }
+
+    /* BANDE ACCENT */
+    .accent-bar { height: 4px; background: linear-gradient(90deg, #1E88C8 0%, #F97316 50%, #1E88C8 100%); }
+
+    /* CORPS */
+    .body { padding: 36px 32px; }
+    .body h2 { color: #0B1120; font-size: 20px; font-weight: 800; margin-bottom: 10px; }
+    .body p { color: #475569; font-size: 14px; line-height: 1.7; margin-bottom: 14px; }
+
+    /* BADGE RÔLE */
+    .badge {
+      display: inline-block;
+      background: linear-gradient(135deg, #1E88C8, #0EA5E9);
+      color: white;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 5px 14px;
+      border-radius: 20px;
+      margin-bottom: 18px;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+    .badge.orange { background: linear-gradient(135deg, #F97316, #FB923C); }
+
+    /* CARTE IDENTIFIANTS */
+    .credentials {
+      background: #F8FAFC;
+      border: 1px solid #E2E8F0;
+      border-left: 4px solid #1E88C8;
+      border-radius: 12px;
+      padding: 22px;
+      margin: 22px 0;
+    }
+    .credentials .row { margin-bottom: 16px; }
     .credentials .row:last-child { margin-bottom: 0; }
-    .badge { display: inline-block; background: #06B6D4; color: white; font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 20px; margin-bottom: 20px; }
-    .warning { background: #fff7ed; border: 1px solid #fed7aa; border-radius: 10px; padding: 14px 16px; margin-top: 16px; }
-    .warning p { color: #c2410c; font-size: 13px; margin: 0; }
-    .footer { background: #f8fafc; padding: 20px 32px; text-align: center; border-top: 1px solid #e2e8f0; }
-    .footer p { color: #94A3B8; font-size: 12px; }
+    .credentials .label {
+      color: #94A3B8;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-bottom: 3px;
+    }
+    .credentials .value {
+      color: #0B1120;
+      font-size: 15px;
+      font-weight: 700;
+      font-family: 'Courier New', monospace;
+    }
+    .credentials .value.highlight {
+      color: #1E88C8;
+      background: #EFF6FF;
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 6px;
+      border: 1px solid #BFDBFE;
+    }
+
+    /* AVERTISSEMENT */
+    .warning {
+      background: #FFF7ED;
+      border: 1px solid #FED7AA;
+      border-left: 4px solid #F97316;
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-top: 18px;
+    }
+    .warning p { color: #9A3412; font-size: 13px; margin: 0; font-weight: 500; }
+
+    /* SUCCÈS */
+    .success {
+      background: #F0FDF4;
+      border: 1px solid #BBF7D0;
+      border-left: 4px solid #22C55E;
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-top: 18px;
+    }
+    .success p { color: #166534; font-size: 13px; margin: 0; font-weight: 500; }
+
+    /* ÉTAPES */
+    .steps { margin: 20px 0; }
+    .step { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
+    .step-num {
+      min-width: 24px; height: 24px;
+      background: #1E88C8;
+      color: white;
+      font-size: 12px;
+      font-weight: 700;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .step-text { color: #475569; font-size: 13px; line-height: 1.5; padding-top: 3px; }
+
+    /* FOOTER */
+    .footer { background: #0B1120; padding: 24px 32px; text-align: center; }
+    .footer-brand { color: #FFFFFF; font-size: 14px; font-weight: 800; margin-bottom: 4px; }
+    .footer-brand span { color: #F97316; }
+    .footer p { color: #475569; font-size: 11px; margin-top: 6px; }
+    .footer-divider { width: 40px; height: 2px; background: linear-gradient(90deg, #1E88C8, #F97316); margin: 10px auto; border-radius: 2px; }
   </style>
 </head>
 <body>
   <div class="container">
+
+    <!-- HEADER -->
     <div class="header">
-      <h1>EduNotify</h1>
-      <p>Plateforme de gestion académique</p>
+      <div class="header-logo">
+        <div class="header-icon">🎓</div>
+      </div>
+      <h1>Smart<span>Campus</span></h1>
+      <div class="header-tagline">Learn · Grow · Succeed</div>
     </div>
+
+    <!-- BANDE ACCENT -->
+    <div class="accent-bar"></div>
+
+    <!-- CORPS -->
     <div class="body">${content}</div>
+
+    <!-- FOOTER -->
     <div class="footer">
-      <p>EduNotify &copy; ${new Date().getFullYear()} — Ne pas répondre à cet email</p>
+      <div class="footer-brand">Smart<span>Campus</span></div>
+      <div class="footer-divider"></div>
+      <p>© ${new Date().getFullYear()} SmartCampus — Plateforme de gestion académique</p>
+      <p style="margin-top:4px;">Ne pas répondre à cet email automatique</p>
     </div>
+
   </div>
 </body>
 </html>
@@ -65,8 +173,9 @@ const templates = {
   admin: ({ prenom, nom, email, password, etablissementNom }) =>
     baseTemplate(`
       <span class="badge">Administrateur</span>
-      <h2>Bienvenue sur EduNotify, ${prenom} !</h2>
-      <p>Un compte administrateur a été créé pour vous afin de gérer l'établissement <strong>${etablissementNom}</strong>.</p>
+      <h2>Bienvenue sur SmartCampus, ${prenom} !</h2>
+      <p>Un compte administrateur a été créé pour vous afin de gérer l'établissement <strong>${etablissementNom}</strong>. Vous pouvez désormais configurer les départements, classes et comptes de votre établissement.</p>
+
       <div class="credentials">
         <div class="row">
           <div class="label">Nom complet</div>
@@ -74,19 +183,35 @@ const templates = {
         </div>
         <div class="row">
           <div class="label">Email de connexion</div>
-          <div class="value">${email}</div>
+          <div class="value highlight">${email}</div>
         </div>
         <div class="row">
           <div class="label">Mot de passe temporaire</div>
-          <div class="value">${password}</div>
+          <div class="value highlight">${password}</div>
         </div>
         <div class="row">
           <div class="label">Établissement</div>
           <div class="value">${etablissementNom}</div>
         </div>
       </div>
+
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-text">Connectez-vous avec les identifiants ci-dessus</div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-text">Changez votre mot de passe lors de la première connexion</div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-text">Configurez votre établissement et invitez vos équipes</div>
+        </div>
+      </div>
+
       <div class="warning">
-        <p>⚠️ Vous devrez changer ce mot de passe lors de votre première connexion.</p>
+        <p>⚠️ Ce mot de passe est temporaire. Vous serez invité à le changer dès votre première connexion.</p>
       </div>
     `),
 
@@ -94,8 +219,9 @@ const templates = {
   chef_departement: ({ prenom, nom, email, password, departementNom, etablissementNom }) =>
     baseTemplate(`
       <span class="badge">Chef de Département</span>
-      <h2>Bienvenue sur EduNotify, ${prenom} !</h2>
+      <h2>Bienvenue sur SmartCampus, ${prenom} !</h2>
       <p>Un compte chef de département a été créé pour vous. Vous gérez le département <strong>${departementNom}</strong> de l'établissement <strong>${etablissementNom}</strong>.</p>
+
       <div class="credentials">
         <div class="row">
           <div class="label">Nom complet</div>
@@ -103,28 +229,49 @@ const templates = {
         </div>
         <div class="row">
           <div class="label">Email de connexion</div>
-          <div class="value">${email}</div>
+          <div class="value highlight">${email}</div>
         </div>
         <div class="row">
           <div class="label">Mot de passe temporaire</div>
-          <div class="value">${password}</div>
+          <div class="value highlight">${password}</div>
         </div>
         <div class="row">
           <div class="label">Département</div>
           <div class="value">${departementNom}</div>
         </div>
+        <div class="row">
+          <div class="label">Établissement</div>
+          <div class="value">${etablissementNom}</div>
+        </div>
       </div>
+
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-text">Connectez-vous avec les identifiants ci-dessus</div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-text">Changez votre mot de passe lors de la première connexion</div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-text">Gérez vos classes, publiez les notes et communiquez avec vos étudiants</div>
+        </div>
+      </div>
+
       <div class="warning">
-        <p>⚠️ Vous devrez changer ce mot de passe lors de votre première connexion.</p>
+        <p>⚠️ Ce mot de passe est temporaire. Vous serez invité à le changer dès votre première connexion.</p>
       </div>
     `),
 
   // ── Compte Délégué ──────────────────────────────────────────────
   delegue: ({ prenom, nom, email, password, classeCode, departementNom }) =>
     baseTemplate(`
-      <span class="badge">Délégué</span>
-      <h2>Bienvenue sur EduNotify, ${prenom} !</h2>
-      <p>Vous avez été désigné délégué de la classe <strong>${classeCode}</strong> du département <strong>${departementNom}</strong>.</p>
+      <span class="badge orange">Délégué de classe</span>
+      <h2>Bienvenue sur SmartCampus, ${prenom} !</h2>
+      <p>Félicitations ! Vous avez été désigné délégué de la classe <strong>${classeCode}</strong> du département <strong>${departementNom}</strong>. Ce rôle vous permettra de gérer les appels de présence et de communiquer avec vos camarades.</p>
+
       <div class="credentials">
         <div class="row">
           <div class="label">Nom complet</div>
@@ -132,19 +279,39 @@ const templates = {
         </div>
         <div class="row">
           <div class="label">Email de connexion</div>
-          <div class="value">${email}</div>
+          <div class="value highlight">${email}</div>
         </div>
         <div class="row">
           <div class="label">Mot de passe temporaire</div>
-          <div class="value">${password}</div>
+          <div class="value highlight">${password}</div>
         </div>
         <div class="row">
           <div class="label">Classe</div>
           <div class="value">${classeCode}</div>
         </div>
+        <div class="row">
+          <div class="label">Département</div>
+          <div class="value">${departementNom}</div>
+        </div>
       </div>
+
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-text">Connectez-vous et changez votre mot de passe</div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-text">Importez la liste CSV de vos camarades</div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-text">Lancez les appels de présence et envoyez des notifications</div>
+        </div>
+      </div>
+
       <div class="warning">
-        <p>⚠️ Vous devrez changer ce mot de passe lors de votre première connexion. En tant que délégué, vous pourrez importer la liste des étudiants de votre classe.</p>
+        <p>⚠️ Ce mot de passe est temporaire. Vous serez invité à le changer dès votre première connexion.</p>
       </div>
     `),
 
@@ -152,8 +319,9 @@ const templates = {
   etudiant: ({ prenom, nom, email, password, matricule, classeCode }) =>
     baseTemplate(`
       <span class="badge">Étudiant</span>
-      <h2>Bienvenue sur EduNotify, ${prenom} !</h2>
-      <p>Votre compte étudiant a été créé. Vous pouvez désormais accéder à la plateforme pour consulter vos présences, notes et notifications.</p>
+      <h2>Bienvenue sur SmartCampus, ${prenom} !</h2>
+      <p>Votre compte étudiant a été créé. Vous pouvez désormais accéder à la plateforme pour consulter vos présences, notes et notifications de votre établissement.</p>
+
       <div class="credentials">
         <div class="row">
           <div class="label">Nom complet</div>
@@ -161,32 +329,56 @@ const templates = {
         </div>
         <div class="row">
           <div class="label">Matricule</div>
-          <div class="value">${matricule}</div>
+          <div class="value highlight">${matricule}</div>
         </div>
         <div class="row">
           <div class="label">Email de connexion</div>
-          <div class="value">${email}</div>
+          <div class="value highlight">${email}</div>
         </div>
         <div class="row">
           <div class="label">Mot de passe temporaire</div>
-          <div class="value">${password}</div>
+          <div class="value highlight">${password}</div>
         </div>
         <div class="row">
           <div class="label">Classe</div>
           <div class="value">${classeCode}</div>
         </div>
       </div>
+
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-text">Téléchargez l'application SmartCampus</div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-text">Connectez-vous avec votre email et mot de passe temporaire</div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-text">Choisissez un nouveau mot de passe personnel</div>
+        </div>
+      </div>
+
       <div class="warning">
-        <p>⚠️ Vous devrez changer ce mot de passe lors de votre première connexion.</p>
+        <p>⚠️ Ce mot de passe est temporaire. Vous serez invité à le changer dès votre première connexion.</p>
       </div>
     `),
 
   // ── Changement de mot de passe ──────────────────────────────────
   passwordChanged: ({ prenom }) =>
     baseTemplate(`
-      <h2>Mot de passe modifié</h2>
-      <p>Bonjour ${prenom},</p>
-      <p>Votre mot de passe EduNotify a été modifié avec succès. Si vous n'êtes pas à l'origine de cette modification, contactez immédiatement votre administrateur.</p>
+      <h2>Mot de passe modifié ✓</h2>
+      <p>Bonjour <strong>${prenom}</strong>,</p>
+      <p>Votre mot de passe SmartCampus a été modifié avec succès. Votre compte est maintenant pleinement actif.</p>
+
+      <div class="success">
+        <p>✅ Votre compte est activé. Vous pouvez utiliser toutes les fonctionnalités de SmartCampus.</p>
+      </div>
+
+      <p style="margin-top: 20px; color: #94A3B8; font-size: 13px;">
+        Si vous n'êtes pas à l'origine de cette modification, contactez immédiatement votre administrateur.
+      </p>
     `),
 };
 
@@ -197,7 +389,7 @@ const templates = {
 const sendEmail = async ({ to, subject, html }) => {
   try {
     const info = await transporter.sendMail({
-      from: `"EduNotify" <${process.env.GMAIL_USER}>`,
+      from: `"SmartCampus" <${process.env.GMAIL_USER}>`,
       to,
       subject,
       html,
@@ -211,44 +403,40 @@ const sendEmail = async ({ to, subject, html }) => {
 };
 
 const EmailService = {
-  // Envoyer identifiants admin
+
   sendAdminCredentials: (data) =>
     sendEmail({
-      to: data.email,
-      subject: `[EduNotify] Vos identifiants administrateur — ${data.etablissementNom}`,
-      html: templates.admin(data),
+      to:      data.email,
+      subject: `[SmartCampus] Vos identifiants administrateur — ${data.etablissementNom}`,
+      html:    templates.admin(data),
     }),
 
-  // Envoyer identifiants chef département
   sendChefCredentials: (data) =>
     sendEmail({
-      to: data.email,
-      subject: `[EduNotify] Vos identifiants chef de département — ${data.departementNom}`,
-      html: templates.chef_departement(data),
+      to:      data.email,
+      subject: `[SmartCampus] Vos identifiants chef de département — ${data.departementNom}`,
+      html:    templates.chef_departement(data),
     }),
 
-  // Envoyer identifiants délégué
   sendDelegueCredentials: (data) =>
     sendEmail({
-      to: data.email,
-      subject: `[EduNotify] Vos identifiants délégué — Classe ${data.classeCode}`,
-      html: templates.delegue(data),
+      to:      data.email,
+      subject: `[SmartCampus] Vos identifiants délégué — Classe ${data.classeCode}`,
+      html:    templates.delegue(data),
     }),
 
-  // Envoyer identifiants étudiant
   sendEtudiantCredentials: (data) =>
     sendEmail({
-      to: data.email,
-      subject: `[EduNotify] Bienvenue — Vos identifiants de connexion`,
-      html: templates.etudiant(data),
+      to:      data.email,
+      subject: `[SmartCampus] Bienvenue — Vos identifiants de connexion`,
+      html:    templates.etudiant(data),
     }),
 
-  // Envoyer confirmation changement mdp
   sendPasswordChanged: (data) =>
     sendEmail({
-      to: data.email,
-      subject: '[EduNotify] Mot de passe modifié',
-      html: templates.passwordChanged(data),
+      to:      data.email,
+      subject: '[SmartCampus] Compte activé — Mot de passe modifié',
+      html:    templates.passwordChanged(data),
     }),
 
   // Envoyer en masse (CSV import)

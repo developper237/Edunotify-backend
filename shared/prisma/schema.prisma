@@ -22,6 +22,7 @@ enum StatutCompte {
   actif
   inactif
   premier_login
+  suspendu
 }
 
 enum Plan {
@@ -140,8 +141,13 @@ model User {
 
   etablissement   Etablissement? @relation(fields: [etablissementId], references: [id])
   departementChef Departement?   @relation("ChefDepartement", fields: [departementId], references: [id])
-  classeEtudiant  Classe?        @relation("EtudiantClasse", fields: [classeEtudiantId], references: [id])
-  classeDelegue   Classe?        @relation("DelegueClasse", fields: [classeDelegueId], references: [id])
+  // AVANT : pas de onDelete précisé -> défaut SetNull -> la suppression
+  // d'une Classe détachait juste l'utilisateur (classeEtudiantId/classeDelegueId
+  // remis à null) au lieu de le supprimer.
+  // APRES : onDelete: Cascade -> supprimer la Classe supprime aussi
+  // automatiquement l'utilisateur (étudiant/délégué) qui lui est rattaché.
+  classeEtudiant  Classe?        @relation("EtudiantClasse", fields: [classeEtudiantId], references: [id], onDelete: Cascade)
+  classeDelegue   Classe?        @relation("DelegueClasse", fields: [classeDelegueId], references: [id], onDelete: Cascade)
 
   presences             Presence[]
   notificationsEnvoyees Notification[]             @relation("NotifExpediteur")
@@ -153,7 +159,9 @@ model User {
   requetes              RequeteNote[]              @relation("EtudiantRequetes")
   requetesTraitees      RequeteNote[]              @relation("RequetesTraitees")
   publications          PublicationNotes[]         @relation("PublicationAuteur")
+  chatMessages ChatMessage[]
 }
+
 
 model RefreshToken {
   id        String   @id @default(cuid())
@@ -183,7 +191,12 @@ model SessionPresence {
   rayonMetres  Int?
   createdAt    DateTime   @default(now())
 
-  classe    Classe     @relation(fields: [classeId], references: [id])
+  // AVANT : pas de onDelete précisé sur un champ requis -> défaut Restrict
+  // -> impossible de supprimer une Classe dès qu'une séance existait pour elle.
+  // APRES : onDelete: Cascade -> supprimer la Classe supprime aussi ses
+  // séances de présence (qui elles-mêmes suppriment déjà en cascade les
+  // Presence associées, cf. le modèle Presence ci-dessous).
+  classe    Classe     @relation(fields: [classeId], references: [id], onDelete: Cascade)
   presences Presence[]
 }
 
@@ -347,4 +360,15 @@ model RequeteNote {
   matiere    Matiere @relation(fields: [matiereId], references: [id])
   etudiant   User    @relation("EtudiantRequetes", fields: [etudiantId], references: [id])
   traiteepar User?   @relation("RequetesTraitees", fields: [traiteeParId], references: [id])
+}
+model ChatMessage {
+  id        String   @id @default(cuid())
+  text      String
+  isUser    Boolean
+  createdAt DateTime @default(now())
+  userId    String
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
 }

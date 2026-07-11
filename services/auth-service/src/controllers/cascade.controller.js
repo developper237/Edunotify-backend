@@ -10,24 +10,71 @@ const {
 const EmailService = require('../../../../shared/email/emailService');
 
 const sigles = {
-  'Genie Logiciel':                          'GL',
-  'Administration Systeme et Reseau':        'ASR',
-  'Genie Civil':                             'GC',
-  'Genie Electrique':                        'GE',
-  'Genie Mecanique':                         'GM',
-  'Informatique de Gestion':                 'IG',
-  'Reseaux et Telecommunications':           'RT',
-  'Topographie':                             'TOPO',
-  'Environnement et Amenagement':            'EA',
-  'Electronique':                            'ELEC',
-  'Automatisme et Informatique Industrielle': 'AII',
-  'Maintenance Industrielle':                'MI',
+'Génie Logiciel': 'GL',
+'Administration et Sécurité des Réseaux': 'ASR',
+'Génie Informatique': 'GI',
+'Génie Réseau et Télécommunications': 'GRT',
+'Génie Électrique et Informatique Industrielle': 'GEII',
+'Génie Industriel et Maintenance': 'GIM',
+'Génie Mécanique et Productique': 'GMP',
+'Génie Thermique et Énergie': 'GTE',
+'Génie Biomédical': 'GBM',
+'Génie Civil': 'GC',
+'Génie des Mines': 'GMI',
+'Génie Métallurgique': 'GME',
+'Génie Ferroviaire': 'GFE',
+'Météorologie': 'MET',
+'Licence en Pétrole et Gaz': 'PG',
+'Logistique Industrielle': 'LI',
+'Économie d\'Énergie et Environnement': 'EEE',
+'Valorisation des Énergies Renouvelables': 'VER',
+'Chimie Pharmaceutique': 'CP',
+'Qualité, Hygiène et Salubrité des Aliments': 'QHSA',
+'Gestion des Entreprises et des Administrations':'GEA',
+'Génie Logistique et Transport': 'GLT',
+'Techniques de Commercialisation': 'TC',
+'Organisation et Gestion Administrative': 'OGA',
+'Gestion Appliquée aux Petites et Moyennes Organisations': 'GAPMO',
+'Gestion Comptable et Financière': 'GCF',
+'Négociation Vente': 'CNV',
+'Gestion des Ressources Humaines': 'GRH',
+'Gestion Bancaire et Financière': 'GBF',
+'Banque et Finances': 'BAF',
+'Assistant Manager': 'AMA',
+'Chimie Industrielle et Pharmaceutique': 'CIP',
+'Mécatronique': 'MECA',
 };
 
+// Normalise une chaîne pour comparaison : enlève les accents, passe en
+// minuscules, trim. Permet de faire matcher "Genie Logiciel" (sans accent,
+// tel qu'envoyé par le mobile) avec "Génie Logiciel" (clé accentuée du
+// dictionnaire ci-dessus) sans avoir à dupliquer chaque entrée.
+const normalize = (str) =>
+  str
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+
+// Dictionnaire des sigles indexé par clé normalisée (sans accents, minuscules)
+const siglesNormalises = Object.fromEntries(
+  Object.entries(sigles).map(([nom, sigle]) => [normalize(nom), sigle])
+);
+
+// IMPORTANT : l'ordre des paramètres ci-dessous (nomSalle, filiere, niveau,
+// formation) doit correspondre exactement à l'ordre utilisé lors de l'appel
+// dans creerClasse: genererCodeClasse(nomSalle, filiere, niveau, formation).
+// Avant, la signature était (filiere, nomSalle, ...) alors que l'appel passait
+// (nomSalle, filiere, ...) : les deux valeurs se retrouvaient inversées à
+// l'intérieur de la fonction, ce qui cassait à la fois le sigle et le nom de
+// salle dans le code généré.
 const genererCodeClasse = (nomSalle, filiere, niveau, formation) => {
   const salle = nomSalle.trim().replace(/\s+/g, '');
-  const sigle = sigles[filiere] ||
+  const sigle =
+    siglesNormalises[normalize(filiere)] ||
     filiere.split(' ').map(w => w[0]?.toUpperCase() || '').join('');
+  // Format aligné sur l'aperçu du mobile (salle-sigle-niveau-formation),
+  // ex: "D-GL-L1-FI"
   return `${salle}-${sigle}-${niveau}-${formation}`;
 };
 

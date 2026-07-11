@@ -45,6 +45,8 @@ app.use('/auth/accounts', accountRoutes);
 app.use('/auth/cascade', cascadeRoutes);
 app.use('/auth/csv', csvRoutes);
 
+const path = require('path');
+app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 // Route par défaut pour tester facilement dans le navigateur du téléphone
 app.get('/', (_, res) => res.send('Serveur Auth EduNotify opérationnel !'));
 

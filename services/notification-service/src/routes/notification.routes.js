@@ -76,6 +76,7 @@ router.post('/sondage/:notifId/voter',
 router.get('/mes-notifications',
   authenticate,
   NotifController.getMesNotifications
+  
 );
 
 // ── Marquer comme lu ──────────────────────────────────────────────

@@ -38,9 +38,18 @@ const AuthController = {
         return res.status(401).json({ error: 'Email ou mot de passe incorrect' });
       }
 
-      if (user.statut === 'inactif') {
-        return res.status(403).json({ error: 'Compte désactivé. Contactez votre administrateur.' });
+      // FIX : 'inactif' = premier login autorisé (doit changer son mdp)
+      // Seul le statut 'suspendu' bloque complètement la connexion
+      if (user.statut === 'suspendu') {
+        return res.status(403).json({ error: 'Compte suspendu. Contactez votre administrateur.' });
       }
+      // Établissement suspendu (défaut de paiement)
+if (user.etablissement && !user.etablissement.actif) {
+  return res.status(403).json({
+    error: 'Votre établissement est suspendu. Contactez le support SmartCampus.',
+    code:  'ETABLISSEMENT_SUSPENDU',
+  });
+}
 
       const passwordOk = await verifyPassword(password, user.passwordHash);
       if (!passwordOk) {
@@ -50,7 +59,6 @@ const AuthController = {
       const accessToken  = generateAccessToken(user);
       const refreshToken = generateRefreshToken(user.id);
 
-      // Sauvegarder le refresh token
       await prisma.refreshToken.create({
         data: {
           token:     refreshToken,
@@ -63,7 +71,8 @@ const AuthController = {
         accessToken,
         refreshToken,
         user: serializeUser(user),
-        premierLogin: user.statut === 'premier_login',
+        // true si c'est le premier login → Flutter affiche l'écran de changement forcé
+        doitChangerMotDePasse: user.statut === 'premier_login',
       });
     } catch (err) {
       console.error('[Login]', err);
@@ -76,9 +85,7 @@ const AuthController = {
     const { refreshToken } = req.body;
     try {
       if (refreshToken) {
-        await prisma.refreshToken.deleteMany({
-          where: { token: refreshToken },
-        });
+        await prisma.refreshToken.deleteMany({ where: { token: refreshToken } });
       }
       return res.json({ message: 'Déconnecté' });
     } catch (err) {
@@ -114,8 +121,8 @@ const AuthController = {
         },
       });
 
-      if (!user || user.statut === 'inactif') {
-        return res.status(401).json({ error: 'Utilisateur non trouvé ou inactif' });
+      if (!user || user.statut === 'suspendu') {
+        return res.status(401).json({ error: 'Utilisateur non trouvé ou suspendu' });
       }
 
       const newAccessToken = generateAccessToken(user);
@@ -130,6 +137,9 @@ const AuthController = {
   },
 
   // ── POST /auth/change-password ──────────────────────────────────
+  // Utilisé depuis les paramètres (compte déjà actif)
+  // ET depuis ForceChangePasswordScreen (premier login, statut inactif)
+  // Dans les deux cas, on passe statut à 'actif' après succès.
   changePassword: async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -139,9 +149,7 @@ const AuthController = {
     const { ancienMotDePasse, nouveauMotDePasse } = req.body;
 
     try {
-      const user = await prisma.user.findUnique({
-        where: { id: req.user.id },
-      });
+      const user = await prisma.user.findUnique({ where: { id: req.user.id } });
 
       const passwordOk = await verifyPassword(ancienMotDePasse, user.passwordHash);
       if (!passwordOk) {
@@ -154,15 +162,11 @@ const AuthController = {
         where: { id: req.user.id },
         data: {
           passwordHash: newHash,
-          statut: 'actif',
+          statut: 'actif', // active le compte si c'était un premier login
         },
       });
 
-      // Notifier par email
-      await EmailService.sendPasswordChanged({
-        email:  user.email,
-        prenom: user.prenom,
-      });
+      await EmailService.sendPasswordChanged({ email: user.email, prenom: user.prenom });
 
       return res.json({ message: 'Mot de passe modifié avec succès' });
     } catch (err) {
@@ -172,6 +176,7 @@ const AuthController = {
   },
 
   // ── POST /auth/first-login ──────────────────────────────────────
+  
   firstLogin: async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -233,9 +238,7 @@ const AuthController = {
         },
       });
 
-      if (!user) {
-        return res.status(404).json({ error: 'Utilisateur non trouvé' });
-      }
+      if (!user) return res.status(404).json({ error: 'Utilisateur non trouvé' });
 
       return res.json({ user: serializeUser(user) });
     } catch (err) {
@@ -243,216 +246,7 @@ const AuthController = {
     }
   },
 
-  // ── PUT /auth/fcm-token ─────────────────────────────────────────
-  updateFcmToken: async (req, res) => {
-    const { fcmToken } = req.body;
-    try {
-      await prisma.user.update({
-        where: { id: req.user.id },
-        data: { fcmToken },
-      });
-      return res.json({ message: 'FCM token mis à jour' });
-    } catch (err) {
-      return res.status(500).json({ error: 'Erreur serveur' });
-    }
-  },
-
-  // ── GET /utilisateurs (SaaS) ──
-  getUsers: async (req, res) => {
-    try {
-      const users = await prisma.user.findMany({
-        where: {
-          etablissementId: req.user.etablissementId,
-        },
-        select: {
-          id: true,
-          nom: true,
-          prenom: true,
-          email: true,
-          role: true,
-          statut: true,
-          matricule: true,
-        },
-        orderBy: { prenom: 'asc' },
-      });
-
-       return res.json({ data: users }); // On renvoie 'data' pour correspondre au code Flutter
-    } catch (err) {
-      console.error('[GetUsers]', err);
-      return res.status(500).json({ error: 'Erreur lors de la récupération' });
-    }
-  },
-
-   // AJOUTE CETTE FONCTION ICI :
-  updateUser: async (req, res) => {
-    const { id } = req.params;
-    const { nom, prenom, matricule } = req.body;
-
-    try {
-      // Vérification que l'utilisateur appartient au même établissement que l'admin
-      const userToUpdate = await prisma.user.findUnique({ where: { id } });
-      
-      if (!userToUpdate || userToUpdate.etablissementId !== req.user.etablissementId) {
-        return res.status(403).json({ error: "Action non autorisée" });
-      }
-
-      const updated = await prisma.user.update({
-        where: { id },
-        data: {
-          nom: nom || undefined,
-          prenom: prenom || undefined,
-          matricule: matricule || undefined,
-        },
-      });
-
-      return res.json({ message: 'Utilisateur mis à jour', data: updated });
-    } catch (err) {
-      console.error('[UpdateUser]', err);
-      return res.status(500).json({ error: 'Erreur lors de la modification' });
-    }
-  },
-  // ── PATCH /auth/utilisateurs/:id ──
-  updateUser: async (req, res) => {
-    const { id } = req.params;
-    const { nom, prenom, matricule } = req.body;
-
-    try {
-      // Vérification de sécurité : l'admin ne peut modifier que les gens de son établissement
-      const userToUpdate = await prisma.user.findUnique({ where: { id } });
-      
-      if (!userToUpdate || userToUpdate.etablissementId !== req.user.etablissementId) {
-        return res.status(403).json({ error: "Action non autorisée" });
-      }
-
-      const updated = await prisma.user.update({
-        where: { id },
-        data: {
-          nom: nom || undefined,
-          prenom: prenom || undefined,
-          matricule: matricule || undefined,
-        },
-      });
-      return res.json({ message: 'Utilisateur mis à jour', data: updated });
-    } catch (err) {
-      console.error('[UpdateUser]', err);
-      return res.status(500).json({ error: 'Erreur lors de la modification' });
-    }
-  },
-
-  // ── DELETE /utilisateurs/:id ──
-  deleteUser: async (req, res) => {
-    const { id } = req.params;
-
-    try {
-      if (id === req.user.id) {
-        return res.status(400).json({ error: "Vous ne pouvez pas supprimer votre propre compte admin" });
-      }
-
-      const userToDelete = await prisma.user.findUnique({ where: { id } });
-      
-      if (!userToDelete || userToDelete.etablissementId !== req.user.etablissementId) {
-        return res.status(403).json({ error: "Action non autorisée ou utilisateur inexistant" });
-      }
-
-      await prisma.user.delete({
-        where: { id },
-      });
-
-      return res.json({ message: 'Utilisateur supprimé avec succès' });
-    } catch (err) {
-      console.error('[DeleteUser]', err);
-      return res.status(500).json({ error: 'Erreur serveur lors de la suppression' });
-    }
-  },
-
-  
-
-    // ── GET /auth/admin-stats (Statistiques SaaS) ──
-  getAdminStats: async (req, res) => {
-    try {
-      const etablissementId = req.user.etablissementId;
-
-      // 1. Compte total
-      const totalUsers = await prisma.user.count({ where: { etablissementId } });
-
-      // 2. Répartition par rôle
-      const roles = await prisma.user.groupBy({
-        by: ['role'],
-        where: { etablissementId },
-        _count: { id: true }
-      });
-
-      // 3. Utilisateurs actifs vs inactifs
-      const activeCount = await prisma.user.count({ 
-        where: { etablissementId, statut: 'actif' } 
-      });
-
-      return res.json({
-        totalUsers,
-        activeUsers: activeCount,
-        roleDistribution: roles.map(r => ({
-          role: r.role,
-          count: r._count.id
-        }))
-      });
-    } catch (err) {
-      console.error('[GetAdminStats]', err);
-      return res.status(500).json({ error: 'Erreur stats' });
-    }
-  },
-
-  // ── GET /auth/superadmin/etablissements ──
-  getEtablissements: async (req, res) => {
-    if (req.user.role !== 'super_admin') return res.status(403).json({ error: "Interdit" });
-    try {
-      const etabs = await prisma.etablissement.findMany({
-        include: { _count: { select: { users: true } } }
-      });
-      res.json({ etablissements: etabs });
-    } catch (err) {
-      res.status(500).json({ error: 'Erreur serveur' });
-    }
-  },
-
-  // ── PUT /auth/superadmin/etablissement/:id ──
- // services/auth-service/src/controllers/auth.controller.js
-
-updateEtablissement: async (req, res) => {
-  try {
-    const { nom, plan } = req.body;
-
-    // CORRECTION : On force en MINUSCULES car ton schéma Prisma a : enum Plan { free, premium }
-    const planFormatte = plan ? plan.toLowerCase() : undefined;
-
-    await prisma.etablissement.update({
-      where: { id: req.params.id },
-      data: { 
-        nom, 
-        plan: planFormatte 
-      }
-    });
-    
-    res.json({ message: "Mis à jour avec succès" });
-  } catch (error) {
-    console.error("[UpdateEtablissement Error]", error);
-    res.status(400).json({ 
-      error: "Erreur de validation Prisma. Le plan doit être 'free' ou 'premium'." 
-    });
-  }
-},
-
-  // ── DELETE /auth/superadmin/etablissement/:id ──
-  deleteEtablissement: async (req, res) => {
-    try {
-      await prisma.etablissement.delete({ where: { id: req.params.id } });
-      res.json({ message: "Supprimé avec succès" });
-    } catch (error) {
-      console.error("[DeleteEtablissement Error]", error);
-      res.status(500).json({ error: "Erreur lors de la suppression." });
-    }
-  }
-};
-
+  // ── PATCH /auth/fcm-token ───────────────────────────────────────
   updateFcmToken: async (req, res) => {
     const { fcmToken } = req.body;
     if (!fcmToken) return res.status(400).json({ error: 'fcmToken requis' });
@@ -461,12 +255,190 @@ updateEtablissement: async (req, res) => {
         where: { id: req.user.id },
         data:  { fcmToken },
       });
-      return res.json({ message: 'FCM token mis a jour' });
+      return res.json({ message: 'FCM token mis à jour' });
     } catch (err) {
       console.error('[FCM Token]', err);
       return res.status(500).json({ error: 'Erreur serveur' });
     }
   },
 
-module.exports = AuthController;
+  // ── GET /auth/utilisateurs ──────────────────────────────────────
+  getUsers: async (req, res) => {
+    try {
+      const users = await prisma.user.findMany({
+        where: { etablissementId: req.user.etablissementId },
+        select: {
+          id:        true,
+          nom:       true,
+          prenom:    true,
+          email:     true,
+          role:      true,
+          statut:    true,
+          matricule: true,
+        },
+        orderBy: { prenom: 'asc' },
+      });
+      return res.json({ data: users });
+    } catch (err) {
+      console.error('[GetUsers]', err);
+      return res.status(500).json({ error: 'Erreur lors de la récupération' });
+    }
+  },
 
+  // ── PATCH /auth/utilisateurs/:id ───────────────────────────────
+  updateUser: async (req, res) => {
+    const { id } = req.params;
+    const { nom, prenom, matricule } = req.body;
+
+    try {
+      const userToUpdate = await prisma.user.findUnique({ where: { id } });
+
+      if (!userToUpdate || userToUpdate.etablissementId !== req.user.etablissementId) {
+        return res.status(403).json({ error: 'Action non autorisée' });
+      }
+
+      const updated = await prisma.user.update({
+        where: { id },
+        data: {
+          nom:       nom       || undefined,
+          prenom:    prenom    || undefined,
+          matricule: matricule || undefined,
+        },
+      });
+
+      return res.json({ message: 'Utilisateur mis à jour', data: updated });
+    } catch (err) {
+      console.error('[UpdateUser]', err);
+      return res.status(500).json({ error: 'Erreur lors de la modification' });
+    }
+  },
+
+  // ── DELETE /auth/utilisateurs/:id ──────────────────────────────
+  deleteUser: async (req, res) => {
+    const { id } = req.params;
+
+    try {
+      if (id === req.user.id) {
+        return res.status(400).json({ error: 'Vous ne pouvez pas supprimer votre propre compte' });
+      }
+
+      const userToDelete = await prisma.user.findUnique({ where: { id } });
+
+      if (!userToDelete || userToDelete.etablissementId !== req.user.etablissementId) {
+        return res.status(403).json({ error: 'Action non autorisée ou utilisateur inexistant' });
+      }
+
+      await prisma.user.delete({ where: { id } });
+
+      return res.json({ message: 'Utilisateur supprimé avec succès' });
+    } catch (err) {
+      console.error('[DeleteUser]', err);
+      return res.status(500).json({ error: 'Erreur serveur lors de la suppression' });
+    }
+  },
+
+  // ── GET /auth/admin-stats ───────────────────────────────────────
+  getAdminStats: async (req, res) => {
+    try {
+      const etablissementId = req.user.etablissementId;
+
+      const totalUsers = await prisma.user.count({ where: { etablissementId } });
+
+      const roles = await prisma.user.groupBy({
+        by: ['role'],
+        where: { etablissementId },
+        _count: { id: true },
+      });
+
+      const activeCount = await prisma.user.count({
+        where: { etablissementId, statut: 'actif' },
+      });
+
+      return res.json({
+        totalUsers,
+        activeUsers: activeCount,
+        roleDistribution: roles.map(r => ({ role: r.role, count: r._count.id })),
+      });
+    } catch (err) {
+      console.error('[GetAdminStats]', err);
+      return res.status(500).json({ error: 'Erreur stats' });
+    }
+  },
+// ── PATCH /auth/etablissement/logo ─────────────────────────────
+  
+  uploadLogoEtablissement: async (req, res) => {
+    try {
+      if (req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Réservé aux administrateurs d\'établissement' });
+      }
+      if (!req.file) {
+        return res.status(400).json({ error: 'Aucun fichier reçu' });
+      }
+      if (!req.user.etablissementId) {
+        return res.status(400).json({ error: 'Aucun établissement associé à ce compte' });
+      }
+ 
+      // URL absolue et accessible depuis les téléphones du réseau local
+      // (même host que celui utilisé par ApiClient._devHost côté Flutter)
+      const baseUrl = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
+      const logoUrl = `${baseUrl}/uploads/logos/${req.file.filename}`;
+ 
+      await prisma.etablissement.update({
+        where: { id: req.user.etablissementId },
+        data:  { logoUrl },
+      });
+ 
+      return res.json({ message: 'Logo mis à jour', logoUrl });
+    } catch (err) {
+      console.error('[UploadLogoEtablissement]', err);
+      return res.status(500).json({ error: 'Erreur serveur lors de l\'upload du logo' });
+    }
+  },
+  // ── GET /auth/superadmin/etablissements ────────────────────────
+  getEtablissements: async (req, res) => {
+    if (req.user.role !== 'super_admin') {
+      return res.status(403).json({ error: 'Interdit' });
+    }
+    try {
+      const etabs = await prisma.etablissement.findMany({
+        include: { _count: { select: { users: true } } },
+      });
+      res.json({ etablissements: etabs });
+    } catch (err) {
+      res.status(500).json({ error: 'Erreur serveur' });
+    }
+  },
+
+  // ── PUT /auth/superadmin/etablissement/:id ─────────────────────
+  updateEtablissement: async (req, res) => {
+    try {
+      const { nom, plan } = req.body;
+      const planFormatte = plan ? plan.toLowerCase() : undefined;
+
+      await prisma.etablissement.update({
+        where: { id: req.params.id },
+        data: { nom, plan: planFormatte },
+      });
+
+      res.json({ message: 'Mis à jour avec succès' });
+    } catch (error) {
+      console.error('[UpdateEtablissement]', error);
+      res.status(400).json({
+        error: "Erreur de validation. Le plan doit être 'free' ou 'premium'.",
+      });
+    }
+  },
+
+  // ── DELETE /auth/superadmin/etablissement/:id ──────────────────
+  deleteEtablissement: async (req, res) => {
+    try {
+      await prisma.etablissement.delete({ where: { id: req.params.id } });
+      res.json({ message: 'Supprimé avec succès' });
+    } catch (error) {
+      console.error('[DeleteEtablissement]', error);
+      res.status(500).json({ error: 'Erreur lors de la suppression.' });
+    }
+  },
+};
+
+module.exports = AuthController;

@@ -60,4 +60,4 @@ desktop.ini
 *.njsproj
 
 *.sln
-
+services/auth-service/uploads/

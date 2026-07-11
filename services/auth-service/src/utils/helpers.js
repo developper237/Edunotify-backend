@@ -64,9 +64,10 @@ const serializeUser = (user) => ({
   fcmToken:         user.fcmToken,
   biometrieActivee: user.biometrieActivee,
   // Infos contextuelles
-  etablissementNom: user.etablissement?.nom,
-  departementNom:   user.departementChef?.nom,
-  salleCode:        user.classeEtudiant?.codeGenere || user.classeDelegue?.codeGenere,
+  etablissementNom:  user.etablissement?.nom,
+  etablissementLogo: user.etablissement?.logoUrl,
+  departementNom:    user.departementChef?.nom,
+  salleCode:         user.classeEtudiant?.codeGenere || user.classeDelegue?.codeGenere,
 });
 
 module.exports = {
