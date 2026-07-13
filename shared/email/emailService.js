@@ -12,11 +12,19 @@ const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',
   port: 465,
   secure: true,
-  family: 4,
+  family: 4, // Force IPv4
   auth: {
     user: process.env.GMAIL_USER,
     pass: process.env.GMAIL_APP_PASSWORD,
   },
+  // 💡 AJOUTS POUR LA PRODUCTION SUR RENDER :
+  connectionTimeout: 10000, // Évite le freeze au démarrage si le réseau sature (10s)
+  greetingTimeout: 10000,   // Temps max pour le message d'accueil SMTP
+  dnsTimeout: 10000,        // Temps max pour la résolution DNS
+  socketTimeout: 20000,     // Temps d'inactivité max du socket
+  tls: {
+    rejectUnauthorized: false // Tolère les proxies/certificats intermédiaires des Clouds PaaS
+  }
 });
 
 // ── Template de base ──────────────────────────────────────────────
@@ -143,7 +151,6 @@ const baseTemplate = (content) => `
 <body>
   <div class="container">
 
-    <!-- HEADER -->
     <div class="header">
       <div class="header-logo">
         <div class="header-icon">🎓</div>
@@ -152,13 +159,10 @@ const baseTemplate = (content) => `
       <div class="header-tagline">Learn · Grow · Succeed</div>
     </div>
 
-    <!-- BANDE ACCENT -->
     <div class="accent-bar"></div>
 
-    <!-- CORPS -->
     <div class="body">${content}</div>
 
-    <!-- FOOTER -->
     <div class="footer">
       <div class="footer-brand">Smart<span>Campus</span></div>
       <div class="footer-divider"></div>
@@ -176,7 +180,6 @@ const baseTemplate = (content) => `
 // ══════════════════════════════════════════════════════════════════
 
 const templates = {
-
   // ── Compte Admin Etablissement ──────────────────────────────────
   admin: ({ prenom, nom, email, password, etablissementNom }) =>
     baseTemplate(`
@@ -428,7 +431,6 @@ const sendEmail = async ({ to, subject, html }) => {
 };
 
 const EmailService = {
-
   sendAdminCredentials: (data) =>
     sendEmail({
       to:      data.email,
