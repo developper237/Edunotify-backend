@@ -4,14 +4,29 @@ const express = require('express');
 const { body } = require('express-validator');
 const router  = express.Router();
 const AuthController = require('../controllers/auth.controller');
+const PasswordController = require('../controllers/password.controller');
 const { authenticate } = require('../middleware/auth.middleware');
 const uploadLogo = require('../config/upload');
+const { prisma } = require('../utils/db');
 
 // ── AUTHENTIFICATION ──────────────────────────────────────────────
 router.post('/login', [
   body('email').isEmail().normalizeEmail(),
   body('password').notEmpty(),
 ], AuthController.login);
+
+// ── MOT DE PASSE OUBLIÉ (routes publiques, pas de authenticate) ──
+// POST /auth/mot-de-passe-oublie
+router.post('/mot-de-passe-oublie', [
+  body('email').isEmail().normalizeEmail(),
+], PasswordController.demanderReinitialisation);
+
+// POST /auth/reinitialiser-mot-de-passe
+router.post('/reinitialiser-mot-de-passe', [
+  body('email').isEmail().normalizeEmail(),
+  body('code').isLength({ min: 6, max: 6 }),
+  body('nouveauMotDePasse').isLength({ min: 8 }),
+], PasswordController.reinitialiserMotDePasse);
 
 router.post('/logout',  authenticate, AuthController.logout);
 router.post('/refresh', AuthController.refresh);

@@ -150,6 +150,7 @@ model User {
   classeDelegue   Classe?        @relation("DelegueClasse", fields: [classeDelegueId], references: [id], onDelete: Cascade)
 
   presences             Presence[]
+  passwordResetCodes    PasswordResetCode[]
   notificationsEnvoyees Notification[]             @relation("NotifExpediteur")
   notificationsRecues   NotificationDestinataire[]
   voteSondages          VoteSondage[]
@@ -162,6 +163,21 @@ model User {
   chatMessages ChatMessage[]
 }
 
+
+// ── Code de réinitialisation de mot de passe (OTP par email) ─────
+model PasswordResetCode {
+  id         String   @id @default(cuid())
+  userId     String
+  codeHash   String
+  expiresAt  DateTime
+  tentatives Int      @default(0)
+  utilise    Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
 
 model RefreshToken {
   id        String   @id @default(cuid())
@@ -224,12 +240,19 @@ model Notification {
   contenu         String
   categorie       CategorieNotif @default(administratif)
   urgence         Boolean        @default(false)
-  expediteurId    String
+  // AVANT : String (requis) sans onDelete -> défaut Restrict -> impossible
+  // de supprimer un utilisateur (étudiant/délégué) tant qu'il avait envoyé
+  // au moins une notification, ce qui bloquait toute la suppression en
+  // cascade d'une classe.
+  // APRES : String? (optionnel) + onDelete: SetNull -> la notification
+  // reste visible pour ses destinataires, mais expediteurId passe à null
+  // si l'expéditeur est supprimé.
+  expediteurId    String?
   etablissementId String?
   estSondage      Boolean        @default(false)
   createdAt       DateTime       @default(now())
 
-  expediteur       User                       @relation("NotifExpediteur", fields: [expediteurId], references: [id])
+  expediteur       User?                      @relation("NotifExpediteur", fields: [expediteurId], references: [id], onDelete: SetNull)
   etablissement    Etablissement?             @relation(fields: [etablissementId], references: [id])
   destinataires    NotificationDestinataire[]
   questionsSondage QuestionSondage[]

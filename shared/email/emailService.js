@@ -103,7 +103,7 @@ const baseTemplate = (content) => `
     .success {
       background: #F0FDF4;
       border: 1px solid #BBF7D0;
-      border-left: 4px solid #22C55E;
+      border-left: 2px solid #22C55E;
       border-radius: 10px;
       padding: 14px 16px;
       margin-top: 18px;
@@ -373,12 +373,29 @@ const templates = {
       <p>Votre mot de passe SmartCampus a été modifié avec succès. Votre compte est maintenant pleinement actif.</p>
 
       <div class="success">
-        <p>✅ Votre compte est activé. Vous pouvez utiliser toutes les fonctionnalités de SmartCampus.</p>
+        <p>Votre compte est activé. Vous pouvez utiliser toutes les fonctionnalités de SmartCampus.</p>
       </div>
 
       <p style="margin-top: 20px; color: #94A3B8; font-size: 13px;">
         Si vous n'êtes pas à l'origine de cette modification, contactez immédiatement votre administrateur.
       </p>
+    `),
+
+  // ── Code de réinitialisation de mot de passe (mot de passe oublié) ──
+  passwordReset: ({ prenom, code }) =>
+    baseTemplate(`
+      <h2>Réinitialisation de mot de passe</h2>
+      <p>Bonjour <strong>${prenom}</strong>,</p>
+      <p>Vous avez demandé la réinitialisation de votre mot de passe SmartCampus. Utilisez le code ci-dessous dans l'application pour définir un nouveau mot de passe.</p>
+
+      <div class="credentials" style="text-align:center;">
+        <div class="label">Code de vérification</div>
+        <div class="value highlight" style="font-size:28px; letter-spacing:6px; padding:8px 16px;">${code}</div>
+      </div>
+
+      <div class="warning">
+        <p>⚠️ Ce code expire dans 10 minutes. Si vous n'êtes pas à l'origine de cette demande, ignorez cet email — votre mot de passe restera inchangé.</p>
+      </div>
     `),
 };
 
@@ -437,6 +454,13 @@ const EmailService = {
       to:      data.email,
       subject: '[SmartCampus] Compte activé — Mot de passe modifié',
       html:    templates.passwordChanged(data),
+    }),
+
+  sendPasswordResetCode: (data) =>
+    sendEmail({
+      to:      data.email,
+      subject: '[SmartCampus] Votre code de réinitialisation de mot de passe',
+      html:    templates.passwordReset(data),
     }),
 
   // Envoyer en masse (CSV import)

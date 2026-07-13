@@ -61,3 +61,4 @@ desktop.ini
 
 *.sln
 services/auth-service/uploads/
+secrets/firebase-service-account.json 
