@@ -3,8 +3,16 @@
 const nodemailer = require('nodemailer');
 
 // ── Transporter Gmail ─────────────────────────────────────────────
+// host/port/secure explicites (au lieu de service: 'gmail') + family: 4
+// pour forcer IPv4 directement au niveau du socket. Nécessaire car
+// Render n'a pas de route IPv6 sortante vers Gmail (ENETUNREACH), et
+// NODE_OPTIONS=--dns-result-order=ipv4first seul ne suffit pas à
+// contourner ça de façon fiable avec le raccourci service: 'gmail'.
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: 'smtp.gmail.com',
+  port: 465,
+  secure: true,
+  family: 4,
   auth: {
     user: process.env.GMAIL_USER,
     pass: process.env.GMAIL_APP_PASSWORD,
@@ -103,7 +111,7 @@ const baseTemplate = (content) => `
     .success {
       background: #F0FDF4;
       border: 1px solid #BBF7D0;
-      border-left: 2px solid #22C55E;
+      border-left: 4px solid #22C55E;
       border-radius: 10px;
       padding: 14px 16px;
       margin-top: 18px;
@@ -373,7 +381,7 @@ const templates = {
       <p>Votre mot de passe SmartCampus a été modifié avec succès. Votre compte est maintenant pleinement actif.</p>
 
       <div class="success">
-        <p>Votre compte est activé. Vous pouvez utiliser toutes les fonctionnalités de SmartCampus.</p>
+        <p>✅ Votre compte est activé. Vous pouvez utiliser toutes les fonctionnalités de SmartCampus.</p>
       </div>
 
       <p style="margin-top: 20px; color: #94A3B8; font-size: 13px;">
