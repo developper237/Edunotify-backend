@@ -9,18 +9,19 @@ const nodemailer = require('nodemailer');
 // NODE_OPTIONS=--dns-result-order=ipv4first seul ne suffit pas à
 // contourner ça de façon fiable avec le raccourci service: 'gmail'.
 const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 587,
-  secure: false, // Doit être à false pour le port 587
-  family: 4,     // Force IPv4
+  host: '74.125.140.108', // IP IPv4 directe de smtp.gmail.com
+  port: 465,
+  secure: true,
   auth: {
     user: process.env.GMAIL_USER,
     pass: process.env.GMAIL_APP_PASSWORD,
   },
+  tls: {
+    // Requis car le certificat de Google est délivré pour "smtp.gmail.com", pas pour l'IP brute
+    servername: 'smtp.gmail.com',
+    rejectUnauthorized: false
+  },
   connectionTimeout: 10000,
-  greetingTimeout: 10000,
-  dnsTimeout: 10000,
-  socketTimeout: 20000,
 });
 
 // ── Template de base ──────────────────────────────────────────────
