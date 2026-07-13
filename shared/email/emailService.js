@@ -1,495 +1,338 @@
 // shared/email/emailService.js
+const sgMail = require('@sendgrid/mail');
 
-const nodemailer = require('nodemailer');
+sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
-// ── Transporter Gmail ─────────────────────────────────────────────
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.GMAIL_USER,
-    pass: process.env.GMAIL_APP_PASSWORD,
-  },
-});
+const FROM_EMAIL = process.env.SENDGRID_FROM_EMAIL || 'sergende695@gmail.com';
+const FROM_NAME  = 'SmartCampus';
 
-// ── Template de base ──────────────────────────────────────────────
-const baseTemplate = (content) => `
+// ── Envoi centralisé ─────────────────────────────────────────────
+async function sendMail({ to, subject, html }) {
+  await sgMail.send({
+    to,
+    from: { email: FROM_EMAIL, name: FROM_NAME },
+    subject,
+    html,
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════
+// BASE TEMPLATE — compatible Gmail + Outlook (table-based)
+// ══════════════════════════════════════════════════════════════════
+
+const baseTemplate = ({ titre, contenu, footer = '' }) => `
 <!DOCTYPE html>
-<html>
+<html lang="fr">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f1f5f9; }
-    .container { max-width: 600px; margin: 40px auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.08); }
-
-    /* HEADER */
-    .header { background: linear-gradient(135deg, #0B1120 0%, #0D1526 50%, #0F1A2E 100%); padding: 36px 32px; text-align: center; }
-    .header-logo { display: inline-flex; align-items: center; gap: 12px; margin-bottom: 8px; }
-    .header-icon { width: 48px; height: 48px; background: linear-gradient(135deg, #1E88C8, #0EA5E9); border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; font-size: 24px; }
-    .header h1 { color: #1E88C8; font-size: 26px; font-weight: 900; letter-spacing: -0.5px; }
-    .header h1 span { color: #F97316; }
-    .header-tagline { color: #64748B; font-size: 12px; margin-top: 4px; letter-spacing: 1px; text-transform: uppercase; }
-
-    /* BANDE ACCENT */
-    .accent-bar { height: 4px; background: linear-gradient(90deg, #1E88C8 0%, #F97316 50%, #1E88C8 100%); }
-
-    /* CORPS */
-    .body { padding: 36px 32px; }
-    .body h2 { color: #0B1120; font-size: 20px; font-weight: 800; margin-bottom: 10px; }
-    .body p { color: #475569; font-size: 14px; line-height: 1.7; margin-bottom: 14px; }
-
-    /* BADGE RÔLE */
-    .badge {
-      display: inline-block;
-      background: linear-gradient(135deg, #1E88C8, #0EA5E9);
-      color: white;
-      font-size: 11px;
-      font-weight: 700;
-      padding: 5px 14px;
-      border-radius: 20px;
-      margin-bottom: 18px;
-      letter-spacing: 0.5px;
-      text-transform: uppercase;
-    }
-    .badge.orange { background: linear-gradient(135deg, #F97316, #FB923C); }
-
-    /* CARTE IDENTIFIANTS */
-    .credentials {
-      background: #F8FAFC;
-      border: 1px solid #E2E8F0;
-      border-left: 4px solid #1E88C8;
-      border-radius: 12px;
-      padding: 22px;
-      margin: 22px 0;
-    }
-    .credentials .row { margin-bottom: 16px; }
-    .credentials .row:last-child { margin-bottom: 0; }
-    .credentials .label {
-      color: #94A3B8;
-      font-size: 10px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.8px;
-      margin-bottom: 3px;
-    }
-    .credentials .value {
-      color: #0B1120;
-      font-size: 15px;
-      font-weight: 700;
-      font-family: 'Courier New', monospace;
-    }
-    .credentials .value.highlight {
-      color: #1E88C8;
-      background: #EFF6FF;
-      display: inline-block;
-      padding: 3px 10px;
-      border-radius: 6px;
-      border: 1px solid #BFDBFE;
-    }
-
-    /* AVERTISSEMENT */
-    .warning {
-      background: #FFF7ED;
-      border: 1px solid #FED7AA;
-      border-left: 4px solid #F97316;
-      border-radius: 10px;
-      padding: 14px 16px;
-      margin-top: 18px;
-    }
-    .warning p { color: #9A3412; font-size: 13px; margin: 0; font-weight: 500; }
-
-    /* SUCCÈS */
-    .success {
-      background: #F0FDF4;
-      border: 1px solid #BBF7D0;
-      border-left: 4px solid #22C55E;
-      border-radius: 10px;
-      padding: 14px 16px;
-      margin-top: 18px;
-    }
-    .success p { color: #166534; font-size: 13px; margin: 0; font-weight: 500; }
-
-    /* ÉTAPES */
-    .steps { margin: 20px 0; }
-    .step { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
-    .step-num {
-      min-width: 24px; height: 24px;
-      background: #1E88C8;
-      color: white;
-      font-size: 12px;
-      font-weight: 700;
-      border-radius: 50%;
-      display: flex; align-items: center; justify-content: center;
-    }
-    .step-text { color: #475569; font-size: 13px; line-height: 1.5; padding-top: 3px; }
-
-    /* FOOTER */
-    .footer { background: #0B1120; padding: 24px 32px; text-align: center; }
-    .footer-brand { color: #FFFFFF; font-size: 14px; font-weight: 800; margin-bottom: 4px; }
-    .footer-brand span { color: #F97316; }
-    .footer p { color: #475569; font-size: 11px; margin-top: 6px; }
-    .footer-divider { width: 40px; height: 2px; background: linear-gradient(90deg, #1E88C8, #F97316); margin: 10px auto; border-radius: 2px; }
-  </style>
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>${titre}</title>
 </head>
-<body>
-  <div class="container">
+<body style="margin:0;padding:0;background-color:#f4f6f8;font-family:Arial,Helvetica,sans-serif;">
 
-    <!-- HEADER -->
-    <div class="header">
-      <div class="header-logo">
-        <div class="header-icon">🎓</div>
-      </div>
-      <h1>Smart<span>Campus</span></h1>
-      <div class="header-tagline">Learn · Grow · Succeed</div>
-    </div>
+<table width="100%" bgcolor="#f4f6f8" cellpadding="0" cellspacing="0" border="0">
+  <tr>
+    <td align="center" style="padding:32px 16px;">
+      <table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;">
 
-    <!-- BANDE ACCENT -->
-    <div class="accent-bar"></div>
+        <!-- HEADER -->
+        <tr>
+          <td>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td bgcolor="#0D1117" align="center"
+                    style="background-color:#0D1117;padding:32px 24px 20px 24px;border-radius:12px 12px 0 0;">
+                  <table cellpadding="0" cellspacing="0" border="0">
+                    <tr>
+                      <td align="center" style="padding-bottom:14px;">
+                        <table cellpadding="0" cellspacing="0" border="0">
+                          <tr>
+                            <td bgcolor="#1A6E8E" align="center" valign="middle"
+                                style="background-color:#1A6E8E;width:56px;height:56px;border-radius:14px;text-align:center;">
+                              <span style="font-size:28px;line-height:56px;">🎓</span>
+                            </td>
+                          </tr>
+                        </table>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td align="center" style="padding-bottom:6px;">
+                        <span style="font-family:Arial,sans-serif;font-size:26px;font-weight:bold;letter-spacing:-0.5px;">
+                          <span style="color:#FFFFFF;">Smart</span><span style="color:#F97316;">Campus</span>
+                        </span>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td align="center">
+                        <span style="font-family:Arial,sans-serif;font-size:11px;color:#9CA3AF;letter-spacing:3px;">
+                          LEARN &middot; GROW &middot; SUCCEED
+                        </span>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
 
-    <!-- CORPS -->
-    <div class="body">${content}</div>
+        <!-- BODY -->
+        <tr>
+          <td bgcolor="#FFFFFF" style="background-color:#FFFFFF;padding:36px 40px 32px 40px;">
+            ${contenu}
+          </td>
+        </tr>
 
-    <!-- FOOTER -->
-    <div class="footer">
-      <div class="footer-brand">Smart<span>Campus</span></div>
-      <div class="footer-divider"></div>
-      <p>© ${new Date().getFullYear()} SmartCampus — Plateforme de gestion académique</p>
-      <p style="margin-top:4px;">Ne pas répondre à cet email automatique</p>
-    </div>
+        <!-- FOOTER -->
+        <tr>
+          <td>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td bgcolor="#0D1117" align="center"
+                    style="background-color:#0D1117;padding:20px 24px;border-radius:0 0 12px 12px;">
+                  ${footer}
+                  <p style="margin:8px 0 0 0;font-family:Arial,sans-serif;font-size:12px;color:#6B7280;">
+                    &copy; 2026 SmartCampus &mdash; Plateforme de gestion acad&eacute;mique<br>
+                    <span style="color:#4B5563;">Ne pas r&eacute;pondre &agrave; cet email automatique</span>
+                  </p>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
 
-  </div>
+      </table>
+    </td>
+  </tr>
+</table>
+
 </body>
-</html>
-`;
+</html>`;
+
+// ── Blocs réutilisables ──────────────────────────────────────────
+const infoBlock = (texte, couleur = '#1A6E8E', bg = '#EFF6FF') => `
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0;">
+  <tr>
+    <td width="4" bgcolor="${couleur}" style="background-color:${couleur};border-radius:4px;">&nbsp;</td>
+    <td bgcolor="${bg}" style="background-color:${bg};padding:14px 16px;border-radius:0 8px 8px 0;">
+      <span style="font-family:Arial,sans-serif;font-size:14px;color:#1F2937;line-height:1.6;">${texte}</span>
+    </td>
+  </tr>
+</table>`;
+
+const successBlock = (texte) => infoBlock(texte, '#16A34A', '#F0FDF4');
+const alertBlock   = (texte) => infoBlock(texte, '#F97316', '#FFF7ED');
+
+const credentialBlock = (lignes) => `
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0;">
+  <tr>
+    <td bgcolor="#F9FAFB" style="background-color:#F9FAFB;padding:20px 24px;border-radius:10px;border:1px solid #E5E7EB;">
+      ${lignes.map(({ label, value }) => `
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:10px;">
+          <tr><td style="font-family:Arial,sans-serif;font-size:12px;color:#6B7280;padding-bottom:2px;">${label}</td></tr>
+          <tr><td style="font-family:Arial,sans-serif;font-size:15px;font-weight:bold;color:#111827;">${value}</td></tr>
+        </table>
+      `).join('')}
+    </td>
+  </tr>
+</table>`;
+
+const para = (texte, opts = '') => `
+<p style="font-family:Arial,sans-serif;font-size:15px;color:#374151;line-height:1.7;margin:0 0 16px 0;${opts}">${texte}</p>`;
+
+const h1 = (texte) => `
+<h1 style="font-family:Arial,sans-serif;font-size:22px;font-weight:bold;color:#111827;margin:0 0 8px 0;line-height:1.3;">${texte}</h1>`;
+
+const separator = () => `
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0;">
+  <tr><td height="1" bgcolor="#E5E7EB" style="background-color:#E5E7EB;line-height:1px;font-size:1px;">&nbsp;</td></tr>
+</table>`;
+
+const footerLogo = () => `
+<span style="font-family:Arial,sans-serif;font-size:18px;font-weight:bold;">
+  <span style="color:#FFFFFF;">Smart</span><span style="color:#F97316;">Campus</span>
+</span>`;
 
 // ══════════════════════════════════════════════════════════════════
-// TEMPLATES PAR RÔLE
+// TEMPLATES
 // ══════════════════════════════════════════════════════════════════
-
-const templates = {
-
-  // ── Compte Admin Etablissement ──────────────────────────────────
-  admin: ({ prenom, nom, email, password, etablissementNom }) =>
-    baseTemplate(`
-      <span class="badge">Administrateur</span>
-      <h2>Bienvenue sur SmartCampus, ${prenom} !</h2>
-      <p>Un compte administrateur a été créé pour vous afin de gérer l'établissement <strong>${etablissementNom}</strong>. Vous pouvez désormais configurer les départements, classes et comptes de votre établissement.</p>
-
-      <div class="credentials">
-        <div class="row">
-          <div class="label">Nom complet</div>
-          <div class="value">${prenom} ${nom}</div>
-        </div>
-        <div class="row">
-          <div class="label">Email de connexion</div>
-          <div class="value highlight">${email}</div>
-        </div>
-        <div class="row">
-          <div class="label">Mot de passe temporaire</div>
-          <div class="value highlight">${password}</div>
-        </div>
-        <div class="row">
-          <div class="label">Établissement</div>
-          <div class="value">${etablissementNom}</div>
-        </div>
-      </div>
-
-      <div class="steps">
-        <div class="step">
-          <div class="step-num">1</div>
-          <div class="step-text">Connectez-vous avec les identifiants ci-dessus</div>
-        </div>
-        <div class="step">
-          <div class="step-num">2</div>
-          <div class="step-text">Changez votre mot de passe lors de la première connexion</div>
-        </div>
-        <div class="step">
-          <div class="step-num">3</div>
-          <div class="step-text">Configurez votre établissement et invitez vos équipes</div>
-        </div>
-      </div>
-
-      <div class="warning">
-        <p>⚠️ Ce mot de passe est temporaire. Vous serez invité à le changer dès votre première connexion.</p>
-      </div>
-    `),
-
-  // ── Compte Chef de Département ──────────────────────────────────
-  chef_departement: ({ prenom, nom, email, password, departementNom, etablissementNom }) =>
-    baseTemplate(`
-      <span class="badge">Chef de Département</span>
-      <h2>Bienvenue sur SmartCampus, ${prenom} !</h2>
-      <p>Un compte chef de département a été créé pour vous. Vous gérez le département <strong>${departementNom}</strong> de l'établissement <strong>${etablissementNom}</strong>.</p>
-
-      <div class="credentials">
-        <div class="row">
-          <div class="label">Nom complet</div>
-          <div class="value">${prenom} ${nom}</div>
-        </div>
-        <div class="row">
-          <div class="label">Email de connexion</div>
-          <div class="value highlight">${email}</div>
-        </div>
-        <div class="row">
-          <div class="label">Mot de passe temporaire</div>
-          <div class="value highlight">${password}</div>
-        </div>
-        <div class="row">
-          <div class="label">Département</div>
-          <div class="value">${departementNom}</div>
-        </div>
-        <div class="row">
-          <div class="label">Établissement</div>
-          <div class="value">${etablissementNom}</div>
-        </div>
-      </div>
-
-      <div class="steps">
-        <div class="step">
-          <div class="step-num">1</div>
-          <div class="step-text">Connectez-vous avec les identifiants ci-dessus</div>
-        </div>
-        <div class="step">
-          <div class="step-num">2</div>
-          <div class="step-text">Changez votre mot de passe lors de la première connexion</div>
-        </div>
-        <div class="step">
-          <div class="step-num">3</div>
-          <div class="step-text">Gérez vos classes, publiez les notes et communiquez avec vos étudiants</div>
-        </div>
-      </div>
-
-      <div class="warning">
-        <p>⚠️ Ce mot de passe est temporaire. Vous serez invité à le changer dès votre première connexion.</p>
-      </div>
-    `),
-
-  // ── Compte Délégué ──────────────────────────────────────────────
-  delegue: ({ prenom, nom, email, password, classeCode, departementNom }) =>
-    baseTemplate(`
-      <span class="badge orange">Délégué de classe</span>
-      <h2>Bienvenue sur SmartCampus, ${prenom} !</h2>
-      <p>Félicitations ! Vous avez été désigné délégué de la classe <strong>${classeCode}</strong> du département <strong>${departementNom}</strong>. Ce rôle vous permettra de gérer les appels de présence et de communiquer avec vos camarades.</p>
-
-      <div class="credentials">
-        <div class="row">
-          <div class="label">Nom complet</div>
-          <div class="value">${prenom} ${nom}</div>
-        </div>
-        <div class="row">
-          <div class="label">Email de connexion</div>
-          <div class="value highlight">${email}</div>
-        </div>
-        <div class="row">
-          <div class="label">Mot de passe temporaire</div>
-          <div class="value highlight">${password}</div>
-        </div>
-        <div class="row">
-          <div class="label">Classe</div>
-          <div class="value">${classeCode}</div>
-        </div>
-        <div class="row">
-          <div class="label">Département</div>
-          <div class="value">${departementNom}</div>
-        </div>
-      </div>
-
-      <div class="steps">
-        <div class="step">
-          <div class="step-num">1</div>
-          <div class="step-text">Connectez-vous et changez votre mot de passe</div>
-        </div>
-        <div class="step">
-          <div class="step-num">2</div>
-          <div class="step-text">Importez la liste CSV de vos camarades</div>
-        </div>
-        <div class="step">
-          <div class="step-num">3</div>
-          <div class="step-text">Lancez les appels de présence et envoyez des notifications</div>
-        </div>
-      </div>
-
-      <div class="warning">
-        <p>⚠️ Ce mot de passe est temporaire. Vous serez invité à le changer dès votre première connexion.</p>
-      </div>
-    `),
-
-  // ── Compte Étudiant (import CSV) ────────────────────────────────
-  etudiant: ({ prenom, nom, email, password, matricule, classeCode }) =>
-    baseTemplate(`
-      <span class="badge">Étudiant</span>
-      <h2>Bienvenue sur SmartCampus, ${prenom} !</h2>
-      <p>Votre compte étudiant a été créé. Vous pouvez désormais accéder à la plateforme pour consulter vos présences, notes et notifications de votre établissement.</p>
-
-      <div class="credentials">
-        <div class="row">
-          <div class="label">Nom complet</div>
-          <div class="value">${prenom} ${nom}</div>
-        </div>
-        <div class="row">
-          <div class="label">Matricule</div>
-          <div class="value highlight">${matricule}</div>
-        </div>
-        <div class="row">
-          <div class="label">Email de connexion</div>
-          <div class="value highlight">${email}</div>
-        </div>
-        <div class="row">
-          <div class="label">Mot de passe temporaire</div>
-          <div class="value highlight">${password}</div>
-        </div>
-        <div class="row">
-          <div class="label">Classe</div>
-          <div class="value">${classeCode}</div>
-        </div>
-      </div>
-
-      <div class="steps">
-        <div class="step">
-          <div class="step-num">1</div>
-          <div class="step-text">Téléchargez l'application SmartCampus</div>
-        </div>
-        <div class="step">
-          <div class="step-num">2</div>
-          <div class="step-text">Connectez-vous avec votre email et mot de passe temporaire</div>
-        </div>
-        <div class="step">
-          <div class="step-num">3</div>
-          <div class="step-text">Choisissez un nouveau mot de passe personnel</div>
-        </div>
-      </div>
-
-      <div class="warning">
-        <p>⚠️ Ce mot de passe est temporaire. Vous serez invité à le changer dès votre première connexion.</p>
-      </div>
-    `),
-
-  // ── Changement de mot de passe ──────────────────────────────────
-  passwordChanged: ({ prenom }) =>
-    baseTemplate(`
-      <h2>Mot de passe modifié ✓</h2>
-      <p>Bonjour <strong>${prenom}</strong>,</p>
-      <p>Votre mot de passe SmartCampus a été modifié avec succès. Votre compte est maintenant pleinement actif.</p>
-
-      <div class="success">
-        <p>Votre compte est activé. Vous pouvez utiliser toutes les fonctionnalités de SmartCampus.</p>
-      </div>
-
-      <p style="margin-top: 20px; color: #94A3B8; font-size: 13px;">
-        Si vous n'êtes pas à l'origine de cette modification, contactez immédiatement votre administrateur.
-      </p>
-    `),
-
-  // ── Code de réinitialisation de mot de passe (mot de passe oublié) ──
-  passwordReset: ({ prenom, code }) =>
-    baseTemplate(`
-      <h2>Réinitialisation de mot de passe</h2>
-      <p>Bonjour <strong>${prenom}</strong>,</p>
-      <p>Vous avez demandé la réinitialisation de votre mot de passe SmartCampus. Utilisez le code ci-dessous dans l'application pour définir un nouveau mot de passe.</p>
-
-      <div class="credentials" style="text-align:center;">
-        <div class="label">Code de vérification</div>
-        <div class="value highlight" style="font-size:28px; letter-spacing:6px; padding:8px 16px;">${code}</div>
-      </div>
-
-      <div class="warning">
-        <p>⚠️ Ce code expire dans 10 minutes. Si vous n'êtes pas à l'origine de cette demande, ignorez cet email — votre mot de passe restera inchangé.</p>
-      </div>
-    `),
-};
-
-// ══════════════════════════════════════════════════════════════════
-// FONCTIONS D'ENVOI
-// ══════════════════════════════════════════════════════════════════
-
-const sendEmail = async ({ to, subject, html }) => {
-  try {
-    const info = await transporter.sendMail({
-      from: `"SmartCampus" <${process.env.GMAIL_USER}>`,
-      to,
-      subject,
-      html,
-    });
-    console.log(`[Email] Envoyé à ${to} — MessageId: ${info.messageId}`);
-    return { success: true, messageId: info.messageId };
-  } catch (error) {
-    console.error(`[Email] Erreur envoi à ${to}:`, error.message);
-    return { success: false, error: error.message };
-  }
-};
 
 const EmailService = {
 
-  sendAdminCredentials: (data) =>
-    sendEmail({
-      to:      data.email,
-      subject: `[SmartCampus] Vos identifiants administrateur — ${data.etablissementNom}`,
-      html:    templates.admin(data),
-    }),
-
-  sendChefCredentials: (data) =>
-    sendEmail({
-      to:      data.email,
-      subject: `[SmartCampus] Vos identifiants chef de département — ${data.departementNom}`,
-      html:    templates.chef_departement(data),
-    }),
-
-  sendDelegueCredentials: (data) =>
-    sendEmail({
-      to:      data.email,
-      subject: `[SmartCampus] Vos identifiants délégué — Classe ${data.classeCode}`,
-      html:    templates.delegue(data),
-    }),
-
-  sendEtudiantCredentials: (data) =>
-    sendEmail({
-      to:      data.email,
-      subject: `[SmartCampus] Bienvenue — Vos identifiants de connexion`,
-      html:    templates.etudiant(data),
-    }),
-
-  sendPasswordChanged: (data) =>
-    sendEmail({
-      to:      data.email,
-      subject: '[SmartCampus] Compte activé — Mot de passe modifié',
-      html:    templates.passwordChanged(data),
-    }),
-
-  sendPasswordResetCode: (data) =>
-    sendEmail({
-      to:      data.email,
-      subject: '[SmartCampus] Votre code de réinitialisation de mot de passe',
-      html:    templates.passwordReset(data),
-    }),
-
-  // Envoyer en masse (CSV import)
-  sendBulkEtudiantCredentials: async (etudiants) => {
-    const results = { success: 0, failed: 0, errors: [] };
-    for (const etudiant of etudiants) {
-      const result = await EmailService.sendEtudiantCredentials(etudiant);
-      if (result.success) {
-        results.success++;
-      } else {
-        results.failed++;
-        results.errors.push({ email: etudiant.email, error: result.error });
-      }
-      // Délai 200ms entre chaque email pour éviter le rate limiting Gmail
-      await new Promise(r => setTimeout(r, 200));
+  // ── Vérification connexion ─────────────────────────────────────
+  async verify() {
+    // SendGrid n'a pas de verify() — on teste juste que la clé est définie
+    if (!process.env.SENDGRID_API_KEY) {
+      throw new Error('SENDGRID_API_KEY manquante');
     }
-    return results;
+    console.log('[Email] SendGrid configuré ✓');
   },
 
-  // Vérifier la connexion SMTP
-  verify: async () => {
-    try {
-      await transporter.verify();
-      console.log('[Email] Connexion SMTP Gmail OK');
-      return true;
-    } catch (error) {
-      console.error('[Email] Erreur SMTP:', error.message);
-      return false;
-    }
+  // ── Bienvenue / Compte créé ────────────────────────────────────
+  async sendWelcome({ email, prenom, nom, role, matricule, motDePasse }) {
+    const roleLabel = {
+      etudiant:         'Étudiant(e)',
+      delegue:          'Délégué(e) de classe',
+      chef_departement: 'Chef de département',
+      admin:            'Administrateur',
+    }[role] || role;
+
+    const html = baseTemplate({
+      titre:   'Bienvenue sur SmartCampus',
+      contenu: `
+        ${h1('Bienvenue sur SmartCampus ! 🎉')}
+        ${para(`Bonjour <strong>${prenom} ${nom}</strong>,`)}
+        ${para("Votre compte a été créé avec succès. Connectez-vous à l'application EduNotify avec les identifiants ci-dessous.")}
+        ${credentialBlock([
+          { label: 'Profil',                   value: roleLabel },
+          ...(matricule ? [{ label: 'Matricule', value: matricule }] : []),
+          { label: 'Email',                    value: email },
+          { label: 'Mot de passe temporaire',  value: motDePasse },
+        ])}
+        ${alertBlock('⚠️ Vous devrez changer ce mot de passe lors de votre première connexion.')}
+        ${separator()}
+        ${para("Si vous n'êtes pas à l'origine de cette création de compte, contactez immédiatement l'administrateur.", 'font-size:13px;color:#6B7280;')}
+      `,
+      footer: footerLogo(),
+    });
+
+    await sendMail({
+      to:      email,
+      subject: '[SmartCampus] Bienvenue — Vos identifiants de connexion',
+      html,
+    });
+  },
+
+  // ── Credentials délégué ───────────────────────────────────────
+  async sendDelegueCredentials({ email, prenom, nom, classe, matricule, motDePasse }) {
+    const html = baseTemplate({
+      titre:   'Vos identifiants délégué',
+      contenu: `
+        ${h1('Vous êtes délégué de classe 🎖️')}
+        ${para(`Bonjour <strong>${prenom} ${nom}</strong>,`)}
+        ${para(`Vous avez été désigné(e) <strong>délégué(e)</strong> de la classe <strong>${classe}</strong>. Voici vos identifiants :`)}
+        ${credentialBlock([
+          { label: 'Classe',                  value: classe },
+          { label: 'Matricule',               value: matricule },
+          { label: 'Email',                   value: email },
+          { label: 'Mot de passe temporaire', value: motDePasse },
+        ])}
+        ${alertBlock('⚠️ Changez ce mot de passe lors de votre première connexion.')}
+        ${separator()}
+        ${para("En tant que délégué, vous pouvez lancer les sessions de présence, valider manuellement les étudiants et envoyer les rapports d'appel.", 'font-size:13px;color:#6B7280;')}
+      `,
+      footer: footerLogo(),
+    });
+
+    await sendMail({
+      to:      email,
+      subject: `[SmartCampus] Vos identifiants délégué — ${classe}`,
+      html,
+    });
+  },
+
+  // ── Mot de passe modifié ───────────────────────────────────────
+  async sendPasswordChanged({ email, prenom }) {
+    const html = baseTemplate({
+      titre:   'Mot de passe modifié',
+      contenu: `
+        ${h1('Mot de passe modifié ✓')}
+        ${para(`Bonjour <strong>${prenom}</strong>,`)}
+        ${para('Votre mot de passe SmartCampus a été modifié avec succès. Votre compte est maintenant pleinement actif.')}
+        ${successBlock('Votre compte est activé. Vous pouvez utiliser toutes les fonctionnalités de SmartCampus.')}
+        ${separator()}
+        ${para("Si vous n'êtes pas à l'origine de cette modification, contactez immédiatement votre administrateur.", 'font-size:13px;color:#6B7280;')}
+      `,
+      footer: footerLogo(),
+    });
+
+    await sendMail({
+      to:      email,
+      subject: '[SmartCampus] Compte activé — Mot de passe modifié',
+      html,
+    });
+  },
+
+  // ── Reset mot de passe ─────────────────────────────────────────
+  async sendPasswordReset({ email, prenom, nouveauMotDePasse }) {
+    const html = baseTemplate({
+      titre:   'Réinitialisation de mot de passe',
+      contenu: `
+        ${h1('Réinitialisation de mot de passe 🔑')}
+        ${para(`Bonjour <strong>${prenom}</strong>,`)}
+        ${para('Une réinitialisation de mot de passe a été effectuée pour votre compte. Voici votre nouveau mot de passe temporaire :')}
+        ${credentialBlock([
+          { label: 'Nouveau mot de passe temporaire', value: nouveauMotDePasse },
+        ])}
+        ${alertBlock('⚠️ Connectez-vous et changez ce mot de passe immédiatement depuis votre profil.')}
+        ${separator()}
+        ${para("Si vous n'avez pas demandé cette réinitialisation, contactez immédiatement votre administrateur.", 'font-size:13px;color:#6B7280;')}
+      `,
+      footer: footerLogo(),
+    });
+
+    await sendMail({
+      to:      email,
+      subject: '[SmartCampus] Réinitialisation de votre mot de passe',
+      html,
+    });
+  },
+
+  // ── Import CSV — résumé ────────────────────────────────────────
+  async sendImportSummary({ email, prenom, created, skipped, errors }) {
+    const html = baseTemplate({
+      titre:   "Résumé de l'import CSV",
+      contenu: `
+        ${h1('Import CSV terminé ✓')}
+        ${para(`Bonjour <strong>${prenom}</strong>,`)}
+        ${para("L'importation de la liste de votre classe est terminée. Voici le résumé :")}
+        ${credentialBlock([
+          { label: '✅ Comptes créés',    value: `${created} étudiant(s)` },
+          { label: '⚠️ Lignes ignorées',  value: `${skipped} ligne(s)` },
+          ...(errors.length > 0
+            ? [{ label: '❌ Erreurs', value: errors.slice(0, 3).join(' | ') }]
+            : []),
+        ])}
+        ${created > 0
+          ? successBlock(`${created} compte(s) créé(s) avec succès. Chaque étudiant a reçu ses identifiants par email.`)
+          : alertBlock("Aucun compte n'a été créé. Vérifiez le format de votre fichier CSV.")}
+      `,
+      footer: footerLogo(),
+    });
+
+    await sendMail({
+      to:      email,
+      subject: "[SmartCampus] Résumé de l'import CSV",
+      html,
+    });
+  },
+
+  // ── Notification générale ──────────────────────────────────────
+  async sendNotification({ email, prenom, titreNotif, contenuNotif, categorie = 'administratif' }) {
+    const couleur = {
+      examen:        '#F97316',
+      resultat:      '#16A34A',
+      cours:         '#1A6E8E',
+      administratif: '#7C3AED',
+    }[categorie] || '#1A6E8E';
+
+    const html = baseTemplate({
+      titre:   titreNotif,
+      contenu: `
+        ${h1(titreNotif)}
+        ${para(`Bonjour <strong>${prenom}</strong>,`)}
+        ${infoBlock(contenuNotif, couleur, '#F5F3FF')}
+        ${para('Connectez-vous à SmartCampus pour plus de détails.')}
+      `,
+      footer: footerLogo(),
+    });
+
+    await sendMail({
+      to:      email,
+      subject: `[SmartCampus] ${titreNotif}`,
+      html,
+    });
   },
 };
 
