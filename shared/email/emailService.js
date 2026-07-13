@@ -3,25 +3,12 @@
 const nodemailer = require('nodemailer');
 
 // ── Transporter Gmail ─────────────────────────────────────────────
-// host/port/secure explicites (au lieu de service: 'gmail') + family: 4
-// pour forcer IPv4 directement au niveau du socket. Nécessaire car
-// Render n'a pas de route IPv6 sortante vers Gmail (ENETUNREACH), et
-// NODE_OPTIONS=--dns-result-order=ipv4first seul ne suffit pas à
-// contourner ça de façon fiable avec le raccourci service: 'gmail'.
 const transporter = nodemailer.createTransport({
-  host: '74.125.140.108', // IP IPv4 directe de smtp.gmail.com
-  port: 465,
-  secure: true,
+  service: 'gmail',
   auth: {
     user: process.env.GMAIL_USER,
     pass: process.env.GMAIL_APP_PASSWORD,
   },
-  tls: {
-    // Requis car le certificat de Google est délivré pour "smtp.gmail.com", pas pour l'IP brute
-    servername: 'smtp.gmail.com',
-    rejectUnauthorized: false
-  },
-  connectionTimeout: 10000,
 });
 
 // ── Template de base ──────────────────────────────────────────────
@@ -148,6 +135,7 @@ const baseTemplate = (content) => `
 <body>
   <div class="container">
 
+    <!-- HEADER -->
     <div class="header">
       <div class="header-logo">
         <div class="header-icon">🎓</div>
@@ -156,10 +144,13 @@ const baseTemplate = (content) => `
       <div class="header-tagline">Learn · Grow · Succeed</div>
     </div>
 
+    <!-- BANDE ACCENT -->
     <div class="accent-bar"></div>
 
+    <!-- CORPS -->
     <div class="body">${content}</div>
 
+    <!-- FOOTER -->
     <div class="footer">
       <div class="footer-brand">Smart<span>Campus</span></div>
       <div class="footer-divider"></div>
@@ -177,6 +168,7 @@ const baseTemplate = (content) => `
 // ══════════════════════════════════════════════════════════════════
 
 const templates = {
+
   // ── Compte Admin Etablissement ──────────────────────────────────
   admin: ({ prenom, nom, email, password, etablissementNom }) =>
     baseTemplate(`
@@ -381,7 +373,7 @@ const templates = {
       <p>Votre mot de passe SmartCampus a été modifié avec succès. Votre compte est maintenant pleinement actif.</p>
 
       <div class="success">
-        <p>✅ Votre compte est activé. Vous pouvez utiliser toutes les fonctionnalités de SmartCampus.</p>
+        <p>Votre compte est activé. Vous pouvez utiliser toutes les fonctionnalités de SmartCampus.</p>
       </div>
 
       <p style="margin-top: 20px; color: #94A3B8; font-size: 13px;">
@@ -428,6 +420,7 @@ const sendEmail = async ({ to, subject, html }) => {
 };
 
 const EmailService = {
+
   sendAdminCredentials: (data) =>
     sendEmail({
       to:      data.email,
