@@ -10,21 +10,17 @@ const nodemailer = require('nodemailer');
 // contourner ça de façon fiable avec le raccourci service: 'gmail'.
 const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',
-  port: 465,
-  secure: true,
-  family: 4, // Force IPv4
+  port: 587,
+  secure: false, // Doit être à false pour le port 587
+  family: 4,     // Force IPv4
   auth: {
     user: process.env.GMAIL_USER,
     pass: process.env.GMAIL_APP_PASSWORD,
   },
-  // 💡 AJOUTS POUR LA PRODUCTION SUR RENDER :
-  connectionTimeout: 10000, // Évite le freeze au démarrage si le réseau sature (10s)
-  greetingTimeout: 10000,   // Temps max pour le message d'accueil SMTP
-  dnsTimeout: 10000,        // Temps max pour la résolution DNS
-  socketTimeout: 20000,     // Temps d'inactivité max du socket
-  tls: {
-    rejectUnauthorized: false // Tolère les proxies/certificats intermédiaires des Clouds PaaS
-  }
+  connectionTimeout: 10000,
+  greetingTimeout: 10000,
+  dnsTimeout: 10000,
+  socketTimeout: 20000,
 });
 
 // ── Template de base ──────────────────────────────────────────────
