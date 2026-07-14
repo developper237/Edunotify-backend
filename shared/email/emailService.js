@@ -1,236 +1,497 @@
 // shared/email/emailService.js
-// Utilise l'API HTTP Brevo (port 443) au lieu du SMTP (ports bloqués sur Render gratuit)
 
-const https = require('https');
+const nodemailer = require('nodemailer');
 
-// ══════════════════════════════════════════════════════════════════
-// FONCTION PRINCIPALE — Envoyer via API HTTP Brevo
-// ══════════════════════════════════════════════════════════════════
+const transporter = nodemailer.createTransport({
+    host: "smtp.gmail.com",
+    port: 587,
+    secure: false,
+    auth: {
+        user: process.env.GMAIL_USER,
+        pass: process.env.GMAIL_APP_PASSWORD,
+    },
+});
 
-const sendEmailBrevo = (to, subject, htmlContent) => {
-  return new Promise((resolve, reject) => {
-    const payload = JSON.stringify({
-      sender:   { name: 'SmartCampus', email: process.env.BREVO_FROM_EMAIL || 'noreply@smartcampus.cm' },
-      to:       [{ email: to }],
-      subject,
-      htmlContent,
-    });
-
-    const options = {
-      hostname: 'api.brevo.com',
-      path:     '/v3/smtp/email',
-      method:   'POST',
-      headers: {
-        'Content-Type':  'application/json',
-        'Content-Length': Buffer.byteLength(payload),
-        'api-key':        process.env.BREVO_API_KEY || '',
-      },
-    };
-
-    const req = https.request(options, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        if (res.statusCode >= 200 && res.statusCode < 300) {
-          console.log(`[Email] Envoyé à ${to} — status ${res.statusCode}`);
-          resolve({ success: true, statusCode: res.statusCode });
-        } else {
-          console.error(`[Email] Erreur Brevo ${res.statusCode}:`, data);
-          reject(new Error(`Brevo API error ${res.statusCode}: ${data}`));
-        }
-      });
-    });
-
-    req.on('error', (err) => {
-      console.error('[Email] Erreur réseau:', err.message);
-      reject(err);
-    });
-
-    req.write(payload);
-    req.end();
-  });
-};
-
-// ══════════════════════════════════════════════════════════════════
-// TEMPLATES
-// ══════════════════════════════════════════════════════════════════
-
-const buildTemplate = (title, preheader, bodyContent) => `
+// ── Template de base ──────────────────────────────────────────────
+const baseTemplate = (content) => `
 <!DOCTYPE html>
-<html lang="fr">
+<html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${title}</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f1f5f9; }
+    .container { max-width: 600px; margin: 40px auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.08); }
+
+    /* HEADER */
+    .header { background: linear-gradient(135deg, #0B1120 0%, #0D1526 50%, #0F1A2E 100%); padding: 36px 32px; text-align: center; }
+    .header-logo { display: inline-flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+    .header-icon { width: 48px; height: 48px; background: linear-gradient(135deg, #1E88C8, #0EA5E9); border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; font-size: 24px; }
+    .header h1 { color: #1E88C8; font-size: 26px; font-weight: 900; letter-spacing: -0.5px; }
+    .header h1 span { color: #F97316; }
+    .header-tagline { color: #64748B; font-size: 12px; margin-top: 4px; letter-spacing: 1px; text-transform: uppercase; }
+
+    /* BANDE ACCENT */
+    .accent-bar { height: 4px; background: linear-gradient(90deg, #1E88C8 0%, #F97316 50%, #1E88C8 100%); }
+
+    /* CORPS */
+    .body { padding: 36px 32px; }
+    .body h2 { color: #0B1120; font-size: 20px; font-weight: 800; margin-bottom: 10px; }
+    .body p { color: #475569; font-size: 14px; line-height: 1.7; margin-bottom: 14px; }
+
+    /* BADGE RÔLE */
+    .badge {
+      display: inline-block;
+      background: linear-gradient(135deg, #1E88C8, #0EA5E9);
+      color: white;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 5px 14px;
+      border-radius: 20px;
+      margin-bottom: 18px;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+    .badge.orange { background: linear-gradient(135deg, #F97316, #FB923C); }
+
+    /* CARTE IDENTIFIANTS */
+    .credentials {
+      background: #F8FAFC;
+      border: 1px solid #E2E8F0;
+      border-left: 4px solid #1E88C8;
+      border-radius: 12px;
+      padding: 22px;
+      margin: 22px 0;
+    }
+    .credentials .row { margin-bottom: 16px; }
+    .credentials .row:last-child { margin-bottom: 0; }
+    .credentials .label {
+      color: #94A3B8;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-bottom: 3px;
+    }
+    .credentials .value {
+      color: #0B1120;
+      font-size: 15px;
+      font-weight: 700;
+      font-family: 'Courier New', monospace;
+    }
+    .credentials .value.highlight {
+      color: #1E88C8;
+      background: #EFF6FF;
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 6px;
+      border: 1px solid #BFDBFE;
+    }
+
+    /* AVERTISSEMENT */
+    .warning {
+      background: #FFF7ED;
+      border: 1px solid #FED7AA;
+      border-left: 4px solid #F97316;
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-top: 18px;
+    }
+    .warning p { color: #9A3412; font-size: 13px; margin: 0; font-weight: 500; }
+
+    /* SUCCÈS */
+    .success {
+      background: #F0FDF4;
+      border: 1px solid #BBF7D0;
+      border-left: 4px solid #22C55E;
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-top: 18px;
+    }
+    .success p { color: #166534; font-size: 13px; margin: 0; font-weight: 500; }
+
+    /* ÉTAPES */
+    .steps { margin: 20px 0; }
+    .step { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
+    .step-num {
+      min-width: 24px; height: 24px;
+      background: #1E88C8;
+      color: white;
+      font-size: 12px;
+      font-weight: 700;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .step-text { color: #475569; font-size: 13px; line-height: 1.5; padding-top: 3px; }
+
+    /* FOOTER */
+    .footer { background: #0B1120; padding: 24px 32px; text-align: center; }
+    .footer-brand { color: #FFFFFF; font-size: 14px; font-weight: 800; margin-bottom: 4px; }
+    .footer-brand span { color: #F97316; }
+    .footer p { color: #475569; font-size: 11px; margin-top: 6px; }
+    .footer-divider { width: 40px; height: 2px; background: linear-gradient(90deg, #1E88C8, #F97316); margin: 10px auto; border-radius: 2px; }
+  </style>
 </head>
-<body style="margin:0;padding:0;background-color:#F0F4F8;font-family:'Segoe UI',Arial,sans-serif;">
-  <div style="display:none;max-height:0;overflow:hidden;">${preheader}</div>
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#F0F4F8;padding:32px 0;">
-    <tr><td align="center">
-      <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
+<body>
+  <div class="container">
 
-        <!-- HEADER -->
-        <tr>
-          <td style="background:#0B1120;border-radius:12px 12px 0 0;padding:28px 32px;text-align:center;">
-            <h1 style="margin:0;font-size:26px;font-weight:900;letter-spacing:-0.5px;">
-              <span style="color:#FFFFFF;">Smart</span><span style="color:#F97316;">Campus</span>
-            </h1>
-            <p style="margin:6px 0 0;color:rgba(255,255,255,0.5);font-size:12px;letter-spacing:1px;text-transform:uppercase;">Plateforme de gestion académique</p>
-          </td>
-        </tr>
-
-        <!-- BODY -->
-        <tr>
-          <td style="background:#FFFFFF;padding:36px 32px;">
-            ${bodyContent}
-          </td>
-        </tr>
-
-        <!-- FOOTER -->
-        <tr>
-          <td style="background:#0B1120;border-radius:0 0 12px 12px;padding:20px 32px;text-align:center;">
-            <p style="margin:0 0 4px;font-size:14px;font-weight:800;">
-              <span style="color:#FFFFFF;">Smart</span><span style="color:#F97316;">Campus</span>
-            </p>
-            <p style="margin:0;color:rgba(255,255,255,0.4);font-size:11px;">
-              Ce message est généré automatiquement — ne pas répondre directement.
-            </p>
-          </td>
-        </tr>
-
-      </table>
-    </td></tr>
-  </table>
-</body>
-</html>`;
-
-// ══════════════════════════════════════════════════════════════════
-// EMAILS MÉTIER
-// ══════════════════════════════════════════════════════════════════
-
-const sendWelcomeEmail = async (to, prenom, motDePasse) => {
-  const body = `
-    <h2 style="color:#0B1120;font-size:22px;margin:0 0 8px;">Bienvenue, ${prenom} 👋</h2>
-    <p style="color:#555;font-size:14px;line-height:1.6;margin:0 0 24px;">
-      Votre compte SmartCampus a été créé avec succès. Voici vos identifiants de connexion :
-    </p>
-    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
-      <tr>
-        <td style="background:#F8F9FA;border-radius:8px;padding:20px 24px;">
-          <p style="margin:0 0 8px;color:#888;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;">Email</p>
-          <p style="margin:0;color:#0B1120;font-size:16px;font-weight:600;">${to}</p>
-          <p style="margin:16px 0 8px;color:#888;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;">Mot de passe temporaire</p>
-          <p style="margin:0;color:#F97316;font-size:22px;font-weight:800;letter-spacing:2px;font-family:monospace;">${motDePasse}</p>
-        </td>
-      </tr>
-    </table>
-    <div style="background:#FFF7ED;border-left:4px solid #F97316;border-radius:0 8px 8px 0;padding:14px 18px;margin-bottom:24px;">
-      <p style="margin:0;color:#92400E;font-size:13px;">
-        ⚠️ Pour des raisons de sécurité, vous devrez changer ce mot de passe lors de votre première connexion.
-      </p>
+    <!-- HEADER -->
+    <div class="header">
+      <div class="header-logo">
+        <div class="header-icon">🎓</div>
+      </div>
+      <h1>Smart<span>Campus</span></h1>
+      <div class="header-tagline">Learn · Grow · Succeed</div>
     </div>
-    <p style="color:#555;font-size:13px;margin:0;">
-      En cas de problème, contactez l'administration de votre établissement.
-    </p>`;
 
-  return sendEmailBrevo(
-    to,
-    'Bienvenue sur SmartCampus — Vos identifiants',
-    buildTemplate('Bienvenue sur SmartCampus', `Mot de passe temporaire : ${motDePasse}`, body)
-  );
-};
+    <!-- BANDE ACCENT -->
+    <div class="accent-bar"></div>
 
-const sendPasswordResetEmail = async (to, prenom, otp) => {
-  const body = `
-    <h2 style="color:#0B1120;font-size:22px;margin:0 0 8px;">Réinitialisation de mot de passe</h2>
-    <p style="color:#555;font-size:14px;line-height:1.6;margin:0 0 24px;">
-      Bonjour ${prenom}, voici votre code de réinitialisation :
-    </p>
-    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
-      <tr>
-        <td align="center" style="background:#F8F9FA;border-radius:12px;padding:28px;">
-          <p style="margin:0 0 8px;color:#888;font-size:12px;text-transform:uppercase;letter-spacing:1px;">Code OTP</p>
-          <p style="margin:0;color:#0B1120;font-size:36px;font-weight:900;letter-spacing:8px;font-family:monospace;">${otp}</p>
-          <p style="margin:12px 0 0;color:#F97316;font-size:12px;font-weight:600;">⏱ Valable 15 minutes</p>
-        </td>
-      </tr>
-    </table>
-    <div style="background:#FEF2F2;border-left:4px solid #EF4444;border-radius:0 8px 8px 0;padding:14px 18px;">
-      <p style="margin:0;color:#991B1B;font-size:13px;">
-        🔒 Si vous n'êtes pas à l'origine de cette demande, ignorez cet email.
+    <!-- CORPS -->
+    <div class="body">${content}</div>
+
+    <!-- FOOTER -->
+    <div class="footer">
+      <div class="footer-brand">Smart<span>Campus</span></div>
+      <div class="footer-divider"></div>
+      <p>© ${new Date().getFullYear()} SmartCampus — Plateforme de gestion académique</p>
+      <p style="margin-top:4px;">Ne pas répondre à cet email automatique</p>
+    </div>
+
+  </div>
+</body>
+</html>
+`;
+
+// ══════════════════════════════════════════════════════════════════
+// TEMPLATES PAR RÔLE
+// ══════════════════════════════════════════════════════════════════
+
+const templates = {
+
+  // ── Compte Admin Etablissement ──────────────────────────────────
+  admin: ({ prenom, nom, email, password, etablissementNom }) =>
+    baseTemplate(`
+      <span class="badge">Administrateur</span>
+      <h2>Bienvenue sur SmartCampus, ${prenom} !</h2>
+      <p>Un compte administrateur a été créé pour vous afin de gérer l'établissement <strong>${etablissementNom}</strong>. Vous pouvez désormais configurer les départements, classes et comptes de votre établissement.</p>
+
+      <div class="credentials">
+        <div class="row">
+          <div class="label">Nom complet</div>
+          <div class="value">${prenom} ${nom}</div>
+        </div>
+        <div class="row">
+          <div class="label">Email de connexion</div>
+          <div class="value highlight">${email}</div>
+        </div>
+        <div class="row">
+          <div class="label">Mot de passe temporaire</div>
+          <div class="value highlight">${password}</div>
+        </div>
+        <div class="row">
+          <div class="label">Établissement</div>
+          <div class="value">${etablissementNom}</div>
+        </div>
+      </div>
+
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-text">Connectez-vous avec les identifiants ci-dessus</div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-text">Changez votre mot de passe lors de la première connexion</div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-text">Configurez votre établissement et invitez vos équipes</div>
+        </div>
+      </div>
+
+      <div class="warning">
+        <p>⚠️ Ce mot de passe est temporaire. Vous serez invité à le changer dès votre première connexion.</p>
+      </div>
+    `),
+
+  // ── Compte Chef de Département ──────────────────────────────────
+  chef_departement: ({ prenom, nom, email, password, departementNom, etablissementNom }) =>
+    baseTemplate(`
+      <span class="badge">Chef de Département</span>
+      <h2>Bienvenue sur SmartCampus, ${prenom} !</h2>
+      <p>Un compte chef de département a été créé pour vous. Vous gérez le département <strong>${departementNom}</strong> de l'établissement <strong>${etablissementNom}</strong>.</p>
+
+      <div class="credentials">
+        <div class="row">
+          <div class="label">Nom complet</div>
+          <div class="value">${prenom} ${nom}</div>
+        </div>
+        <div class="row">
+          <div class="label">Email de connexion</div>
+          <div class="value highlight">${email}</div>
+        </div>
+        <div class="row">
+          <div class="label">Mot de passe temporaire</div>
+          <div class="value highlight">${password}</div>
+        </div>
+        <div class="row">
+          <div class="label">Département</div>
+          <div class="value">${departementNom}</div>
+        </div>
+        <div class="row">
+          <div class="label">Établissement</div>
+          <div class="value">${etablissementNom}</div>
+        </div>
+      </div>
+
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-text">Connectez-vous avec les identifiants ci-dessus</div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-text">Changez votre mot de passe lors de la première connexion</div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-text">Gérez vos classes, publiez les notes et communiquez avec vos étudiants</div>
+        </div>
+      </div>
+
+      <div class="warning">
+        <p>⚠️ Ce mot de passe est temporaire. Vous serez invité à le changer dès votre première connexion.</p>
+      </div>
+    `),
+
+  // ── Compte Délégué ──────────────────────────────────────────────
+  delegue: ({ prenom, nom, email, password, classeCode, departementNom }) =>
+    baseTemplate(`
+      <span class="badge orange">Délégué de classe</span>
+      <h2>Bienvenue sur SmartCampus, ${prenom} !</h2>
+      <p>Félicitations ! Vous avez été désigné délégué de la classe <strong>${classeCode}</strong> du département <strong>${departementNom}</strong>. Ce rôle vous permettra de gérer les appels de présence et de communiquer avec vos camarades.</p>
+
+      <div class="credentials">
+        <div class="row">
+          <div class="label">Nom complet</div>
+          <div class="value">${prenom} ${nom}</div>
+        </div>
+        <div class="row">
+          <div class="label">Email de connexion</div>
+          <div class="value highlight">${email}</div>
+        </div>
+        <div class="row">
+          <div class="label">Mot de passe temporaire</div>
+          <div class="value highlight">${password}</div>
+        </div>
+        <div class="row">
+          <div class="label">Classe</div>
+          <div class="value">${classeCode}</div>
+        </div>
+        <div class="row">
+          <div class="label">Département</div>
+          <div class="value">${departementNom}</div>
+        </div>
+      </div>
+
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-text">Connectez-vous et changez votre mot de passe</div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-text">Importez la liste CSV de vos camarades</div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-text">Lancez les appels de présence et envoyez des notifications</div>
+        </div>
+      </div>
+
+      <div class="warning">
+        <p>⚠️ Ce mot de passe est temporaire. Vous serez invité à le changer dès votre première connexion.</p>
+      </div>
+    `),
+
+  // ── Compte Étudiant (import CSV) ────────────────────────────────
+  etudiant: ({ prenom, nom, email, password, matricule, classeCode }) =>
+    baseTemplate(`
+      <span class="badge">Étudiant</span>
+      <h2>Bienvenue sur SmartCampus, ${prenom} !</h2>
+      <p>Votre compte étudiant a été créé. Vous pouvez désormais accéder à la plateforme pour consulter vos présences, notes et notifications de votre établissement.</p>
+
+      <div class="credentials">
+        <div class="row">
+          <div class="label">Nom complet</div>
+          <div class="value">${prenom} ${nom}</div>
+        </div>
+        <div class="row">
+          <div class="label">Matricule</div>
+          <div class="value highlight">${matricule}</div>
+        </div>
+        <div class="row">
+          <div class="label">Email de connexion</div>
+          <div class="value highlight">${email}</div>
+        </div>
+        <div class="row">
+          <div class="label">Mot de passe temporaire</div>
+          <div class="value highlight">${password}</div>
+        </div>
+        <div class="row">
+          <div class="label">Classe</div>
+          <div class="value">${classeCode}</div>
+        </div>
+      </div>
+
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-text">Téléchargez l'application SmartCampus</div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-text">Connectez-vous avec votre email et mot de passe temporaire</div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-text">Choisissez un nouveau mot de passe personnel</div>
+        </div>
+      </div>
+
+      <div class="warning">
+        <p>⚠️ Ce mot de passe est temporaire. Vous serez invité à le changer dès votre première connexion.</p>
+      </div>
+    `),
+
+  // ── Changement de mot de passe ──────────────────────────────────
+  passwordChanged: ({ prenom }) =>
+    baseTemplate(`
+      <h2>Mot de passe modifié ✓</h2>
+      <p>Bonjour <strong>${prenom}</strong>,</p>
+      <p>Votre mot de passe SmartCampus a été modifié avec succès. Votre compte est maintenant pleinement actif.</p>
+
+      <div class="success">
+        <p>✅ Votre compte est activé. Vous pouvez utiliser toutes les fonctionnalités de SmartCampus.</p>
+      </div>
+
+      <p style="margin-top: 20px; color: #94A3B8; font-size: 13px;">
+        Si vous n'êtes pas à l'origine de cette modification, contactez immédiatement votre administrateur.
       </p>
-    </div>`;
+    `),
 
-  return sendEmailBrevo(
-    to,
-    'SmartCampus — Code de réinitialisation',
-    buildTemplate('Réinitialisation', `Votre code OTP : ${otp}`, body)
-  );
-};
+  // ── Code de réinitialisation de mot de passe (mot de passe oublié) ──
+  passwordReset: ({ prenom, code }) =>
+    baseTemplate(`
+      <h2>Réinitialisation de mot de passe</h2>
+      <p>Bonjour <strong>${prenom}</strong>,</p>
+      <p>Vous avez demandé la réinitialisation de votre mot de passe SmartCampus. Utilisez le code ci-dessous dans l'application pour définir un nouveau mot de passe.</p>
 
-const sendNotePublishedEmail = async (to, prenom, publication, moyenne) => {
-  const admis = moyenne >= 10;
-  const body = `
-    <h2 style="color:#0B1120;font-size:22px;margin:0 0 8px;">📋 Nouvelles notes disponibles</h2>
-    <p style="color:#555;font-size:14px;line-height:1.6;margin:0 0 24px;">
-      Bonjour ${prenom}, vos résultats pour <strong>${publication}</strong> ont été publiés.
-    </p>
-    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
-      <tr>
-        <td align="center" style="background:${admis ? '#F0FDF4' : '#FFF7ED'};border-radius:12px;padding:28px;">
-          <p style="margin:0 0 4px;color:#888;font-size:12px;text-transform:uppercase;letter-spacing:1px;">Moyenne générale</p>
-          <p style="margin:0;color:${admis ? '#16A34A' : '#EA580C'};font-size:40px;font-weight:900;">${moyenne}/20</p>
-          <p style="margin:12px 0 0;display:inline-block;background:${admis ? '#16A34A' : '#EA580C'};color:white;padding:4px 16px;border-radius:20px;font-size:12px;font-weight:700;">
-            ${admis ? '✅ ADMIS' : '⚠️ À RATTRAPER'}
-          </p>
-        </td>
-      </tr>
-    </table>
-    <p style="color:#555;font-size:13px;margin:0;">
-      Connectez-vous sur SmartCampus pour consulter le détail de vos notes et soumettre une requête si nécessaire.
-    </p>`;
+      <div class="credentials" style="text-align:center;">
+        <div class="label">Code de vérification</div>
+        <div class="value highlight" style="font-size:28px; letter-spacing:6px; padding:8px 16px;">${code}</div>
+      </div>
 
-  return sendEmailBrevo(
-    to,
-    `SmartCampus — Résultats ${publication}`,
-    buildTemplate('Notes publiées', `Votre moyenne : ${moyenne}/20`, body)
-  );
-};
-
-const sendRapportEmail = async (to, prenomChef, delegueNom, matiere, taux) => {
-  const body = `
-    <h2 style="color:#0B1120;font-size:22px;margin:0 0 8px;">📊 Nouveau rapport d'appel</h2>
-    <p style="color:#555;font-size:14px;line-height:1.6;margin:0 0 24px;">
-      Bonjour ${prenomChef}, le délégué <strong>${delegueNom}</strong> vous a transmis un rapport de présence.
-    </p>
-    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
-      <tr>
-        <td style="background:#F8F9FA;border-radius:8px;padding:20px 24px;">
-          <p style="margin:0 0 6px;color:#888;font-size:12px;">Matière</p>
-          <p style="margin:0 0 16px;color:#0B1120;font-size:16px;font-weight:600;">${matiere}</p>
-          <p style="margin:0 0 6px;color:#888;font-size:12px;">Taux de présence</p>
-          <p style="margin:0;color:${taux >= 75 ? '#16A34A' : taux >= 50 ? '#EA580C' : '#DC2626'};font-size:28px;font-weight:900;">${taux}%</p>
-        </td>
-      </tr>
-    </table>
-    <p style="color:#555;font-size:13px;margin:0;">
-      Consultez le rapport PDF complet dans l'onglet <strong>Rapports</strong> de SmartCampus.
-    </p>`;
-
-  return sendEmailBrevo(
-    to,
-    `SmartCampus — Rapport d'appel : ${matiere}`,
-    buildTemplate("Rapport d'appel", `Taux de présence : ${taux}%`, body)
-  );
+      <div class="warning">
+        <p>⚠️ Ce code expire dans 10 minutes. Si vous n'êtes pas à l'origine de cette demande, ignorez cet email — votre mot de passe restera inchangé.</p>
+      </div>
+    `),
 };
 
 // ══════════════════════════════════════════════════════════════════
-// EXPORTS
+// FONCTIONS D'ENVOI
 // ══════════════════════════════════════════════════════════════════
 
-module.exports = {
-  sendWelcomeEmail,
-  sendPasswordResetEmail,
-  sendNotePublishedEmail,
-  sendRapportEmail,
+const sendEmail = async ({ to, subject, html }) => {
+  try {
+    const info = await transporter.sendMail({
+      from: `"SmartCampus" <${process.env.EMAIL_FROM}>`,
+      to,
+      subject,
+      html,
+    });
+    console.log(`[Email] Envoyé à ${to} — MessageId: ${info.messageId}`);
+    return { success: true, messageId: info.messageId };
+  } catch (error) {
+    console.error(`[Email] Erreur envoi à ${to}:`, error.message);
+    return { success: false, error: error.message };
+  }
 };
+
+const EmailService = {
+
+  sendAdminCredentials: (data) =>
+    sendEmail({
+      to:      data.email,
+      subject: `[SmartCampus] Vos identifiants administrateur — ${data.etablissementNom}`,
+      html:    templates.admin(data),
+    }),
+
+  sendChefCredentials: (data) =>
+    sendEmail({
+      to:      data.email,
+      subject: `[SmartCampus] Vos identifiants chef de département — ${data.departementNom}`,
+      html:    templates.chef_departement(data),
+    }),
+
+  sendDelegueCredentials: (data) =>
+    sendEmail({
+      to:      data.email,
+      subject: `[SmartCampus] Vos identifiants délégué — Classe ${data.classeCode}`,
+      html:    templates.delegue(data),
+    }),
+
+  sendEtudiantCredentials: (data) =>
+    sendEmail({
+      to:      data.email,
+      subject: `[SmartCampus] Bienvenue — Vos identifiants de connexion`,
+      html:    templates.etudiant(data),
+    }),
+
+  sendPasswordChanged: (data) =>
+    sendEmail({
+      to:      data.email,
+      subject: '[SmartCampus] Compte activé — Mot de passe modifié',
+      html:    templates.passwordChanged(data),
+    }),
+
+  sendPasswordResetCode: (data) =>
+    sendEmail({
+      to:      data.email,
+      subject: '[SmartCampus] Votre code de réinitialisation de mot de passe',
+      html:    templates.passwordReset(data),
+    }),
+
+  // Envoyer en masse (CSV import)
+  sendBulkEtudiantCredentials: async (etudiants) => {
+    const results = { success: 0, failed: 0, errors: [] };
+    for (const etudiant of etudiants) {
+      const result = await EmailService.sendEtudiantCredentials(etudiant);
+      if (result.success) {
+        results.success++;
+      } else {
+        results.failed++;
+        results.errors.push({ email: etudiant.email, error: result.error });
+      }
+      // Délai 200ms entre chaque email pour éviter le rate limiting Gmail
+      await new Promise(r => setTimeout(r, 200));
+    }
+    return results;
+  },
+
+  // Vérifier la connexion SMTP
+  verify: async () => {
+    try {
+      await transporter.verify();
+      console.log('[Email] Connexion SMTP Gmail OK');
+      return true;
+    } catch (error) {
+      console.error('[Email] Erreur SMTP:', error.message);
+      return false;
+    }
+  },
+};
+
+module.exports = EmailService;
