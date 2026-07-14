@@ -70,7 +70,7 @@ app.use((err, req, res, next) => {
 const start = async () => {
   try {
     await connectDB();
-    console.log('[Auth Service] Email service (Brevo API) prêt');
+    await EmailService.verify();
 
     // MODIFICATION ICI : On ajoute '0.0.0.0'
     // Cela permet au serveur d'écouter sur TOUTES les interfaces réseau (Wi-Fi, Ethernet, etc.)
