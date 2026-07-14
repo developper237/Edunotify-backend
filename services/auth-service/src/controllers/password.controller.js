@@ -49,11 +49,11 @@ const PasswordController = {
         data: { userId: user.id, codeHash, expiresAt },
       });
 
-      await EmailService.sendPasswordResetCode({
-        email:  user.email,
-        prenom: user.prenom,
-        code,
-      });
+    await EmailService.sendPasswordResetCode({
+  email:  user.email,
+  prenom: user.prenom,
+  code,
+});
 
       return res.json(REPONSE_GENERIQUE);
     } catch (err) {
@@ -124,9 +124,9 @@ const PasswordController = {
       // Best-effort : si l'email de confirmation échoue, on ne bloque pas
       // la réinitialisation qui, elle, a déjà réussi.
       EmailService.sendPasswordChanged({
-        email:  user.email,
-        prenom: user.prenom,
-      }).catch((e) => console.error('[ReinitialiserMotDePasse] Email confirmation:', e));
+  email:  user.email,
+  prenom: user.prenom,
+}).catch((e) => console.error('[ReinitialiserMotDePasse] Email confirmation:', e));
 
       return res.json({ message: 'Mot de passe réinitialisé avec succès' });
     } catch (err) {
