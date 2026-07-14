@@ -4,7 +4,47 @@ const Redis = require('ioredis');
 let redis;
 
 const connectRedis = async () => {
-  redis = new Redis(process.env.REDIS_URL);
+  const Redis = require("ioredis");
+
+let redis;
+
+const connectRedis = async () => {
+  if (redis) return redis;
+
+  redis = new Redis(process.env.REDIS_URL, {
+    maxRetriesPerRequest: null,
+    enableReadyCheck: false,
+    lazyConnect: true,
+    retryStrategy(times) {
+      console.log(`[Redis] Nouvelle tentative ${times}`);
+      return Math.min(times * 200, 5000);
+    },
+  });
+
+  redis.on("connect", () => {
+    console.log("[Presence Service] Redis connecté");
+  });
+
+  redis.on("ready", () => {
+    console.log("[Presence Service] Redis prêt");
+  });
+
+  redis.on("error", (err) => {
+    console.error("[Presence Service] Redis erreur :", err.message);
+  });
+
+  redis.on("close", () => {
+    console.log("[Presence Service] Redis fermé");
+  });
+
+  redis.on("reconnecting", () => {
+    console.log("[Presence Service] Reconnexion Redis...");
+  });
+
+  await redis.connect();
+
+  return redis;
+};
   redis.on('connect', () =>
     console.log('[Presence Service] Redis connecté')
   );
