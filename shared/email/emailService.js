@@ -488,7 +488,7 @@ const EmailService = {
   verify: async () => {
     try {
       await transporter.verify();
-      console.log('[Email] Connexion SMTP Gmail OK');
+      console.log('[Email] Connexion SMTP BREVO OK');
       return true;
     } catch (error) {
       console.error('[Email] Erreur SMTP:', error.message);
