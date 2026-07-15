@@ -162,7 +162,10 @@ const CascadeController = {
   creerDepartement: async (req, res) => {
     const { nom, description, emailChef, prenomChef, nomChef } = req.body;
     try {
-      const admin = await prisma.user.findUnique({ where: { id: req.user.id } });
+      const admin = await prisma.user.findUnique({
+         where: { id: req.user.id },
+         include: { etablissement: true },
+         });
       const existingUser = await prisma.user.findUnique({ where: { email: emailChef } });
       if (existingUser) return res.status(409).json({ error: `L'email ${emailChef} est déjà utilisé` });
 
