@@ -189,7 +189,10 @@ const CascadeController = {
   etablissementNom: admin.etablissementNom ?? '',
 });
 
-      return res.status(201).json(departement);
+      return res.status(201).json({
+  message:     'Département créé avec succès',
+  departement: departement,
+});
     } catch (err) {
       return res.status(500).json({ error: 'Erreur serveur' });
     }
