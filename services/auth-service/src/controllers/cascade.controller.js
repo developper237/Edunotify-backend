@@ -180,6 +180,14 @@ const CascadeController = {
           etablissementId: admin.etablissementId, departementId: departement.id,
         },
       });
+      await EmailService.sendChefCredentials({
+  email:           emailChef,
+  prenom:          prenomChef,
+  nom:             nomChef,
+  password:        tempPassword,
+  departementNom:  nom,
+  etablissementNom: admin.etablissementNom ?? '',
+});
 
       return res.status(201).json(departement);
     } catch (err) {
