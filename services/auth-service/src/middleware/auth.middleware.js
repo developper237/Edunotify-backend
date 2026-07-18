@@ -1,7 +1,7 @@
 const jwt = require('jsonwebtoken');
 // VÉRIFIEZ CE CHEMIN : est-ce ../config/prisma ou ../prismaClient ?
 // Regardez dans vos controllers comment vous faites require('...') pour prisma
-const prisma = require('../config/prisma'); 
+const { prisma } = require('../utils/db');
 
 const authenticate = async (req, res, next) => {
   const header = req.headers.authorization;
