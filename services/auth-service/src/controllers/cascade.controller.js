@@ -217,16 +217,62 @@ const CascadeController = {
   },
 
   modifierDepartement: async (req, res) => {
-    try {
-      const updated = await prisma.departement.update({
-        where: { id: req.params.id },
-        data:  req.body
+  try {
+    const { nom, description, emailChef, prenomChef, nomChef } = req.body;
+
+    // Mise à jour du département
+    const updated = await prisma.departement.update({
+      where: { id: req.params.id },
+      data:  { nom, description },
+    });
+
+    // Si un nouveau chef est fourni, on crée son compte
+    if (emailChef && prenomChef && nomChef) {
+      // Vérifie que l'email n'est pas déjà utilisé
+      const existing = await prisma.user.findUnique({ where: { email: emailChef } });
+      if (existing) {
+        return res.status(409).json({ error: `L'email ${emailChef} est déjà utilisé` });
+      }
+
+      const tempPassword = generateTempPassword(emailChef.split('@')[0]);
+      const passwordHash = await hashPassword(tempPassword);
+
+      // Récupère l'établissement pour l'email
+      const dept = await prisma.departement.findUnique({
+        where:   { id: req.params.id },
+        include: { etablissement: true },
       });
-      return res.json(updated);
-    } catch (err) {
-      return res.status(500).json({ error: 'Erreur serveur' });
+
+      await prisma.user.create({
+        data: {
+          nom:             nomChef,
+          prenom:          prenomChef,
+          email:           emailChef,
+          passwordHash,
+          role:            'chef_departement',
+          statut:          'premier_login',
+          etablissementId: dept.etablissementId,
+          departementId:   req.params.id,
+        },
+      });
+
+      // Envoie les identifiants par email
+      await EmailService.sendChefCredentials({
+        email:            emailChef,
+        prenom:           prenomChef,
+        nom:              nomChef,
+        password:         tempPassword,
+        departementNom:   nom ?? dept.nom,
+        etablissementNom: dept.etablissement?.nom ?? '',
+      });
     }
-  },
+
+    return res.json({ message: 'Département mis à jour', departement: updated });
+  } catch (err) {
+    console.error('[modifierDepartement]', err);
+    return res.status(500).json({ error: 'Erreur serveur' });
+  }
+},
 
   supprimerDepartement: async (req, res) => {
     try {

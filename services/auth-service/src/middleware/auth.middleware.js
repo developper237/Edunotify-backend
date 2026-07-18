@@ -19,6 +19,22 @@ const authenticate = (req, res, next) => {
     }
     return res.status(401).json({ error: 'Token invalide' });
   }
+    if (decoded.etablissementId) {
+    const etab = await prisma.etablissement.findUnique({
+      where:  { id: decoded.etablissementId },
+      select: { actif: true },
+    });
+    if (!etab || !etab.actif) {
+      return res.status(403).json({
+        error: 'Votre établissement a été suspendu. Contactez votre administrateur.',
+        code:  'ETABLISSEMENT_SUSPENDU',
+      });
+    }
+  }
+
+  req.user = decoded;
+  next();
+
 };
 
 const requireRole = (...roles) => (req, res, next) => {

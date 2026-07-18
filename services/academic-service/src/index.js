@@ -591,9 +591,13 @@ app.get('/academic/badge',
 app.post('/academic/requetes',
   auth, requireRole(['etudiant', 'delegue']), // 💡 AJOUTÉ : 'delegue'
   async (req, res) => {
-    const { noteId, motif } = req.body;
-    if (!noteId || !motif)
-      return res.status(400).json({ error: 'noteId et motif requis' });
+  const { noteId, publicationId, matiereId, motif, type } = req.body;
+if (!motif || !matiereId) {
+  return res.status(400).json({ error: 'matiereId et motif requis' });
+}
+if (!noteId && !publicationId) {
+  return res.status(400).json({ error: 'noteId ou publicationId requis' });
+}
     if (motif.trim().length < 10)
       return res.status(400).json({ error: 'Motif trop court (min 10 caractères)' });
 

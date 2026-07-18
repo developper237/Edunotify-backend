@@ -342,6 +342,7 @@ model PublicationNotes {
   classe Classe @relation(fields: [classeId], references: [id], onDelete: Cascade)
   auteur User   @relation("PublicationAuteur", fields: [publiePar], references: [id])
   notes  Note[]
+   requetes RequeteNote[] 
 }
 
 model Note {
@@ -368,21 +369,23 @@ model Note {
 }
 
 model RequeteNote {
-  id           String        @id @default(cuid())
-  motif        String
-  statut       StatutRequete @default(en_attente)
-  reponse      String?
-  noteId       String
-  matiereId    String
-  etudiantId   String
-  traiteeParId String?
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  id            String        @id @default(cuid())
+  motif         String
+  statut        StatutRequete @default(en_attente)
+  reponse       String?
+  noteId        String?       // ← optionnel (null si note absente)
+  publicationId String?       // ← nouveau : pour les notes absentes
+  matiereId     String
+  etudiantId    String
+  traiteeParId  String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
-  note       Note    @relation(fields: [noteId], references: [id], onDelete: Cascade)
-  matiere    Matiere @relation(fields: [matiereId], references: [id])
-  etudiant   User    @relation("EtudiantRequetes", fields: [etudiantId], references: [id])
-  traiteepar User?   @relation("RequetesTraitees", fields: [traiteeParId], references: [id])
+  note        Note?            @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  publication PublicationNotes? @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  matiere     Matiere          @relation(fields: [matiereId], references: [id])
+  etudiant    User             @relation("EtudiantRequetes", fields: [etudiantId], references: [id])
+  traiteepar  User?            @relation("RequetesTraitees", fields: [traiteeParId], references: [id])
 }
 model ChatMessage {
   id        String   @id @default(cuid())
