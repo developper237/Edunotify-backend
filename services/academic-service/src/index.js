@@ -514,6 +514,7 @@ app.get('/academic/publications/:id/bulletin',
         return {
           id:          note?.id          ?? `missing-${m.id}`,
           matiereId:   m.id,
+          publicationId: publication.id,
           matiere:     m.nom,
           coefficient: m.coefficient,
           valeur:      note?.valeur      ?? null,
