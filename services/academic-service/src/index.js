@@ -445,7 +445,7 @@ app.get('/academic/mes-publications',
 
       const result = await Promise.all(publications.map(async p => {
         const notes = await prisma.note.findMany({
-          where:   { publicationId: p.id, etudiantId: req.user.id, publiee: true,  valeur: { not: null } },
+          where:   { publicationId: p.id, etudiantId: req.user.id, publiee: true,  valeur: { not: undefined } },
           include: { matiere: { select: { coefficient: true } } },
         });
 
