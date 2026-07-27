@@ -347,7 +347,7 @@ model PublicationNotes {
 
 model Note {
   id            String   @id @default(cuid())
-  valeur        Float
+  valeur        Float?
   noteMax       Float    @default(20)
   publiee       Boolean  @default(false)
   commentaire   String?
