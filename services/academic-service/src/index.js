@@ -621,16 +621,17 @@ if (!noteId && !publicationId) {
     });
 
     if (!note) {
-      note = await prisma.note.create({
-        data: {
-          matiereId,
-          etudiantId: req.user.id,
-          publicationId,
-          valeur:  null,
-          publiee: true, // cohérent avec le fait que le bulletin est déjà publié
-        },
-        include: { matiere: true },
-      });
+      note = // APRÈS — connecte la relation explicitement
+await prisma.note.create({
+  data: {
+    matiere:    { connect: { id: matiereId } },
+    etudiant:   { connect: { id: etudiantId } },
+    publication: publicationId ? { connect: { id: publicationId } } : undefined,
+    valeur:  null,
+    publiee: true,
+  },
+  include: { matiere: true }
+});
     }
   }
 
