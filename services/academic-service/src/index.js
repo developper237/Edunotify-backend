@@ -445,7 +445,7 @@ app.get('/academic/mes-publications',
 
       const result = await Promise.all(publications.map(async p => {
         const notes = await prisma.note.findMany({
-          where:   { publicationId: p.id, etudiantId: req.user.id, publiee: true },
+          where:   { publicationId: p.id, etudiantId: req.user.id, publiee: true,  valeur: { not: null } },
           include: { matiere: { select: { coefficient: true } } },
         });
 
@@ -589,50 +589,61 @@ app.get('/academic/badge',
 // ÉTUDIANT & DÉLÉGUÉ — Soumettre une requête
 // ══════════════════════════════════════════════════════════════════
 
-app.post('/academic/requetes',
-  auth, requireRole(['etudiant', 'delegue']), // 💡 AJOUTÉ : 'delegue'
-  async (req, res) => {
-  const { noteId, publicationId, matiereId, motif, type } = req.body;
-if (!motif || !matiereId) {
-  return res.status(400).json({ error: 'matiereId et motif requis' });
-}
-if (!noteId && !publicationId) {
-  return res.status(400).json({ error: 'noteId ou publicationId requis' });
-}
-    if (motif.trim().length < 10)
-      return res.status(400).json({ error: 'Motif trop court (min 10 caractères)' });
+try {
+  let note;
 
-    try {
-      const note = await prisma.note.findUnique({
-        where: { id: noteId }, include: { matiere: true },
-      });
+  if (noteId) {
+    // Cas normal : contestation d'une note déjà notée et publiée
+    note = await prisma.note.findUnique({
+      where: { id: noteId }, include: { matiere: true },
+    });
+    if (!note) return res.status(404).json({ error: 'Note introuvable' });
+  } else {
+    // Cas "note absente" : aucune ligne Note n'existe encore en base pour
+    // cette matière/publication — on la crée avec valeur: null, pour
+    // pouvoir y attacher la requête comme sur une note normale.
+    note = await prisma.note.findFirst({
+      where: { etudiantId: req.user.id, matiereId, publicationId },
+      include: { matiere: true },
+    });
 
-      if (!note)                    return res.status(404).json({ error: 'Note introuvable' });
-      if (note.etudiantId !== req.user.id) return res.status(403).json({ error: 'Note inaccessible' });
-      if (!note.publiee)                return res.status(400).json({ error: 'Note non publiée' });
-
-      const existante = await prisma.requeteNote.findFirst({
-        where: { noteId, etudiantId: req.user.id, statut: 'en_attente' },
-      });
-      if (existante) return res.status(409).json({ error: 'Requête déjà en attente pour cette note' });
-
-      const requete = await prisma.requeteNote.create({
-        data: { noteId, matiereId: note.matiereId, etudiantId: req.user.id, motif: motif.trim() },
-      });
-
-      return res.status(201).json({
-        message: 'Requête soumise',
-        requete: {
-          id: requete.id, statut: requete.statut,
-          motif: requete.motif, matiere: note.matiere.nom, createdAt: requete.createdAt,
+    if (!note) {
+      note = await prisma.note.create({
+        data: {
+          matiereId,
+          etudiantId: req.user.id,
+          publicationId,
+          valeur:  null,
+          publiee: true, // cohérent avec le fait que le bulletin est déjà publié
         },
+        include: { matiere: true },
       });
-    } catch (err) {
-      console.error('[Academic] Requête:', err);
-      return res.status(500).json({ error: 'Erreur serveur' });
     }
   }
-);
+
+  if (note.etudiantId !== req.user.id) return res.status(403).json({ error: 'Note inaccessible' });
+  if (!note.publiee)                   return res.status(400).json({ error: 'Note non publiée' });
+
+  const existante = await prisma.requeteNote.findFirst({
+    where: { noteId: note.id, etudiantId: req.user.id, statut: 'en_attente' },
+  });
+  if (existante) return res.status(409).json({ error: 'Requête déjà en attente pour cette note' });
+
+  const requete = await prisma.requeteNote.create({
+    data: { noteId: note.id, matiereId: note.matiereId, etudiantId: req.user.id, motif: motif.trim() },
+  });
+
+  return res.status(201).json({
+    message: 'Requête soumise',
+    requete: {
+      id: requete.id, statut: requete.statut,
+      motif: requete.motif, matiere: note.matiere.nom, createdAt: requete.createdAt,
+    },
+  });
+} catch (err) {
+  console.error('[Academic] Requête:', err);
+  return res.status(500).json({ error: 'Erreur serveur' });
+}
 
 // ══════════════════════════════════════════════════════════════════
 // ÉTUDIANT & DÉLÉGUÉ — Ses requêtes
