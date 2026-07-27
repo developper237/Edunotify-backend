@@ -589,7 +589,20 @@ app.get('/academic/badge',
 // ÉTUDIANT & DÉLÉGUÉ — Soumettre une requête
 // ══════════════════════════════════════════════════════════════════
 
-try {
+app.post('/academic/requetes',
+  auth, requireRole(['etudiant', 'delegue']), // 💡 AJOUTÉ : 'delegue'
+  async (req, res) => {
+  const { noteId, publicationId, matiereId, motif, type } = req.body;
+if (!motif || !matiereId) {
+  return res.status(400).json({ error: 'matiereId et motif requis' });
+}
+if (!noteId && !publicationId) {
+  return res.status(400).json({ error: 'noteId ou publicationId requis' });
+}
+    if (motif.trim().length < 10)
+      return res.status(400).json({ error: 'Motif trop court (min 10 caractères)' });
+
+    try {
   let note;
 
   if (noteId) {
@@ -644,6 +657,8 @@ try {
   console.error('[Academic] Requête:', err);
   return res.status(500).json({ error: 'Erreur serveur' });
 }
+  }
+);
 
 // ══════════════════════════════════════════════════════════════════
 // ÉTUDIANT & DÉLÉGUÉ — Ses requêtes
