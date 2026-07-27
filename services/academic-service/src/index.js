@@ -625,7 +625,7 @@ if (!noteId && !publicationId) {
 await prisma.note.create({
   data: {
     matiere:    { connect: { id: matiereId } },
-    etudiant:   { connect: { id: etudiantId } },
+    etudiant: { connect: { id: req.user.id } },
     publication: publicationId ? { connect: { id: publicationId } } : undefined,
     valeur:  null,
     publiee: true,
