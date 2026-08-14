@@ -222,7 +222,7 @@ model Presence {
   userId      String
   statut      StatutPresence @default(present)
   confirmeA   DateTime       @default(now())
-  methode     String         @default("code")
+  methode     String         @default("otp")
   etudiantLat Float?
   etudiantLng Float?
   distanceM   Int?
