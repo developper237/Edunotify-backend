@@ -537,130 +537,105 @@ app.post('/presence/sessions/:id/envoyer-rapport',
 // Fix 3 : logs détaillés pour debug
 // ══════════════════════════════════════════════════════════════════
  
-app.post('/presence/confirmer', auth, requireRole('etudiant'), async (req, res) => {
-  const { code, latitude, longitude, deviceId } = req.body;
-  if (!code || code.length !== 6)
-    return res.status(400).json({ error: 'Code invalide' });
- 
+app.post('/presence/confirmer', auth, requireRole('etudiant', 'delegue'), async (req, res) => {
   try {
+    const { code, latitude, longitude, methode = 'otp', confirmeA } = req.body;
+
+    if (!code) return res.status(400).json({ error: 'Code requis' });
+
+    const userId   = req.user.id;
+    const classeId = req.headers['x-classe-id'] || req.user.classeId;
+
+    // ── Trouver la session via Redis ou BD ───────────────────
+    let session = null;
+
+    // Chercher d'abord dans Redis (session active)
     const sessionData = await redis.get(`session:${code}`);
-    if (!sessionData)
-      return res.status(400).json({
-        error: 'Code invalide ou session expirée',
-        code:  'CODE_EXPIRED',
+    if (sessionData) {
+      const parsed = JSON.parse(sessionData);
+      session = await prisma.sessionPresence.findUnique({
+        where: { id: parsed.sessionId },
       });
- 
-    const { sessionId, classeId, gpsLat, gpsLng, rayonMetres } =
-      JSON.parse(sessionData);
- 
-    // Vérifier la classe de l'étudiant
-    const classeIdEtudiant =
-      req.user.classeId ||
-      (await prisma.user.findUnique({
-        where:  { id: req.user.id },
-        select: { classeEtudiantId: true },
-      }))?.classeEtudiantId;
- 
-    if (classeIdEtudiant !== classeId)
-      return res.status(403).json({
-        error: "Ce code n'est pas destiné à votre classe",
+    }
+
+    // Fallback : chercher en BD si QR code offline (session peut être fermée)
+    if (!session) {
+      session = await prisma.sessionPresence.findFirst({
+        where: {
+          code,
+          classeId,
+        },
+        orderBy: { ouverteLe: 'desc' },
       });
- 
-    // ✅ Fix device anti-fraude
-    if (deviceId) {
-      const deviceDejaUtilise = await prisma.presence.findFirst({
-        where:   { sessionId, deviceId, statut: 'present' },
-        include: { user: { select: { prenom: true, nom: true } } },
-      });
-      if (deviceDejaUtilise) {
-        return res.status(409).json({
-          error:    `Cet appareil a déjà confirmé la présence de ${deviceDejaUtilise.user.prenom} ${deviceDejaUtilise.user.nom} pour cette séance`,
-          code:     'DEVICE_ALREADY_USED',
-          etudiant: `${deviceDejaUtilise.user.prenom} ${deviceDejaUtilise.user.nom}`,
+    }
+
+    if (!session) {
+      return res.status(404).json({ error: 'Session introuvable ou code invalide' });
+    }
+
+    // ── Vérifier la fenêtre de validité pour les confirmations offline ──
+    const momentConfirmation = confirmeA ? new Date(confirmeA) : new Date();
+    const TOLERANCE_OFFLINE_MS = 5 * 60 * 1000; // 5 minutes après fermeture
+
+    if (session.fermeeLe) {
+      const delai = momentConfirmation.getTime() - session.fermeeLe.getTime();
+      if (delai > TOLERANCE_OFFLINE_MS) {
+        return res.status(400).json({
+          error: 'La session était déjà fermée au moment de votre confirmation.',
+          fermeeLe: session.fermeeLe,
         });
       }
     }
- 
-    // ✅ Fix géolocalisation
+
+    // ── Vérifier doublon ─────────────────────────────────────
+    const dejaConfirme = await prisma.presence.findUnique({
+      where: { sessionId_userId: { sessionId: session.id, userId } },
+    });
+    if (dejaConfirme) {
+      return res.status(409).json({ error: 'Présence déjà confirmée' });
+    }
+
+    // ── Géolocalisation si requise ───────────────────────────
     let distanceM = null;
- 
-    if (gpsLat != null && gpsLng != null && rayonMetres != null) {
-      // ✅ Fix 1 : vérification stricte null/undefined (évite !0 = true)
-      if (latitude == null || latitude === undefined ||
-          longitude == null || longitude === undefined) {
+    if (session.geoRequise && session.gpsLat && session.gpsLng) {
+      if (!latitude || !longitude) {
         return res.status(400).json({
           error: 'Position GPS requise pour cette session',
-          code:  'GPS_REQUIRED',
+          geoRequise: true,
         });
       }
- 
-      const lat1 = Number(gpsLat);
-      const lng1 = Number(gpsLng);
-      const lat2 = Number(latitude);
-      const lng2 = Number(longitude);
- 
-      if (isNaN(lat2) || isNaN(lng2)) {
-        return res.status(400).json({
-          error: 'Coordonnées GPS invalides',
-          code:  'GPS_INVALID',
-        });
-      }
- 
-      // Calcul Haversine
-      const R    = 6371000; // rayon Terre en mètres
-      const dLat = (lat2 - lat1) * Math.PI / 180;
-      const dLon = (lng2 - lng1) * Math.PI / 180;
-      const a    =
-        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-        Math.cos(lat1 * Math.PI / 180) *
-        Math.cos(lat2 * Math.PI / 180) *
-        Math.sin(dLon / 2) * Math.sin(dLon / 2);
-      distanceM  = Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
- 
-      console.log(`[Geo] Étudiant ${req.user.id} — distance: ${distanceM}m / rayon: ${rayonMetres}m (marge: ${MARGE_GPS_METRES}m)`);
- 
-      // ✅ Fix 2 : rayon effectif = rayon + marge GPS intérieur
-      const rayonEffectif = Number(rayonMetres) + MARGE_GPS_METRES;
- 
-      if (distanceM > rayonEffectif) {
+      distanceM = calculerDistance(
+        session.gpsLat, session.gpsLng,
+        latitude, longitude
+      );
+      if (distanceM > (session.rayonMetres || 100)) {
         return res.status(403).json({
-          error:          `Vous êtes trop loin (${distanceM}m, rayon autorisé: ${rayonMetres}m)`,
-          code:           'HORS_ZONE',
-          distance:       distanceM,
-          rayon:          rayonMetres,
-          rayonEffectif,
+          error: `Vous êtes trop loin (${Math.round(distanceM)}m). Rayon autorisé : ${session.rayonMetres}m`,
+          distanceM: Math.round(distanceM),
         });
       }
     }
- 
-    // Vérifier doublon
-    const dejaConfirme = await prisma.presence.findUnique({
-      where: { sessionId_userId: { sessionId, userId: req.user.id } },
-    });
-    if (dejaConfirme)
-      return res.status(409).json({ error: 'Vous avez déjà confirmé votre présence' });
- 
-    // Créer la présence
+
+    // ── Enregistrer la présence ──────────────────────────────
     const presence = await prisma.presence.create({
       data: {
-        sessionId,
-        userId:      req.user.id,
-        statut:      'present',
-        methode:     'code',
-        etudiantLat: latitude  != null ? Number(latitude)  : null,
-        etudiantLng: longitude != null ? Number(longitude) : null,
-        distanceM,
-        deviceId:    deviceId || null,
+        sessionId:  session.id,
+        userId,
+        statut:     'present',
+        confirmeA:  momentConfirmation,
+        methode,                    // ← "otp" | "qr" | "manuel"
+        etudiantLat: latitude  ?? null,
+        etudiantLng: longitude ?? null,
+        distanceM:  distanceM ? Math.round(distanceM) : null,
       },
     });
- 
-    console.log(`[Presence] ✓ ${req.user.id} confirmé — session ${sessionId} — distance ${distanceM ?? 'N/A'}m`);
- 
-    return res.status(201).json({
+
+    return res.json({
       message:   'Présence confirmée',
       confirmeA: presence.confirmeA,
-      distanceM,
+      methode:   presence.methode,
     });
+
   } catch (err) {
     console.error('[Presence] Confirmer:', err);
     return res.status(500).json({ error: 'Erreur serveur' });
