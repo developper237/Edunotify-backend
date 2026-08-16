@@ -28,6 +28,8 @@ enum StatutCompte {
 enum Plan {
   free
   premium
+  pro
+  institution
 }
 
 enum Formation {
@@ -70,6 +72,31 @@ enum StatutRequete {
   rejetee
 }
 
+enum StatutAbonnement {
+  essai
+  actif
+  expire
+  annule
+  impaye
+}
+
+enum CycleFacturation {
+  mensuel
+  annuel
+}
+
+enum StatutFacture {
+  en_attente
+  payee
+  echouee
+  remboursee
+}
+
+enum MethodePaiement {
+  mtn_momo
+  orange_money
+}
+
 model Etablissement {
   id        String   @id @default(cuid())
   nom       String
@@ -86,6 +113,8 @@ model Etablissement {
   departements  Departement[]
   users         User[]
   notifications Notification[]
+  abonnement    Subscription?
+  factures      Invoice[]
 }
 
 model Departement {
@@ -397,4 +426,70 @@ model ChatMessage {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
+}
+
+// ──────────────────────────────────────────────────────────────────
+// FACTURATION & ABONNEMENTS
+// ──────────────────────────────────────────────────────────────────
+// Catalogue des offres. Tarification par taille d'établissement
+// (maxEtudiants = null signifie effectif illimité).
+model BillingPlan {
+  id              String   @id @default(cuid())
+  code            Plan     @unique
+  nom             String
+  description     String?
+  maxEtudiants    Int? // null = illimité
+  prixMensuelXAF  Int
+  prixAnnuelXAF   Int
+  fonctionnalites Json?
+  actif           Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  abonnements Subscription[]
+}
+
+// Abonnement actuel d'un établissement (un seul par établissement).
+model Subscription {
+  id                 String            @id @default(cuid())
+  etablissementId    String            @unique
+  planCode           Plan
+  statut             StatutAbonnement  @default(essai)
+  cycle              CycleFacturation  @default(mensuel)
+  essaiJusqua        DateTime? // fin de l'essai gratuit (14 jours)
+  debutPeriode       DateTime? // début de la période payée
+  finPeriode         DateTime? // fin de la période payée
+  prixXAF            Int? // montant facturé par période
+  renouvellementAuto Boolean           @default(true)
+  annuleLe           DateTime?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  etablissement Etablissement @relation(fields: [etablissementId], references: [id], onDelete: Cascade)
+  plan          BillingPlan   @relation(fields: [planCode], references: [code])
+  factures      Invoice[]
+
+  @@index([statut])
+}
+
+// Facture émise pour une période d'abonnement.
+model Invoice {
+  id                String           @id @default(cuid())
+  numero            String           @unique // ex: INV-XXXXXX (aussi transaction_id CinetPay)
+  subscriptionId    String
+  etablissementId   String
+  montantXAF        Int
+  cycle             CycleFacturation
+  statut            StatutFacture    @default(en_attente)
+  methodePaiement   MethodePaiement?
+  referencePaiement String? // transaction_id CinetPay
+  urlPaiement       String? // URL de paiement CinetPay
+  payeeLe           DateTime?
+  createdAt         DateTime         @default(now())
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  etablissement Etablissement @relation(fields: [etablissementId], references: [id], onDelete: Cascade)
+
+  @@index([etablissementId, createdAt])
+  @@index([statut])
 }

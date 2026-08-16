@@ -12,9 +12,14 @@ const app  = express();
 const PORT = process.env.PORT || 8080;
 
 // ── Middlewares ───────────────────────────────────────────────────
+// CORS configurable via CORS_ORIGIN (liste séparée par des virgules, '*' par défaut)
+const corsOrigins = (process.env.CORS_ORIGIN || '*')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
 app.use(helmet());
 app.use(cors({
-  origin: '*',
+  origin: corsOrigins,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
@@ -33,6 +38,7 @@ const authenticate = (req, res, next) => {
     '/auth/login',
     '/auth/refresh',
     '/health',
+    '/billing/webhooks', // IPN CinetPay (pas de JWT côté CinetPay)
   ];
 
   if (publicRoutes.some(r => req.path.startsWith(r))) {
@@ -89,11 +95,6 @@ app.use('/auth', createProxyMiddleware(
   proxyOptions(process.env.AUTH_SERVICE_URL)
 ));
 
-// User Service → /users/*
-app.use('/users', createProxyMiddleware(
-  proxyOptions(process.env.USER_SERVICE_URL)
-));
-
 // Notification Service → /notifications/*
 app.use('/notifications', createProxyMiddleware(
   proxyOptions(process.env.NOTIFICATION_SERVICE_URL)
@@ -109,9 +110,14 @@ app.use('/academic', createProxyMiddleware(
   proxyOptions(process.env.ACADEMIC_SERVICE_URL)
 ));
 
-// File Service → /files/*
-app.use('/files', createProxyMiddleware(
-  proxyOptions(process.env.FILE_SERVICE_URL)
+// Chatbot Service → /api/chat/*
+app.use('/api/chat', createProxyMiddleware(
+  proxyOptions(process.env.CHATBOT_SERVICE_URL || 'http://chatbot-service:8085')
+));
+
+// Billing Service → /billing/*
+app.use('/billing', createProxyMiddleware(
+  proxyOptions(process.env.BILLING_SERVICE_URL || 'http://billing-service:3007')
 ));
 
 // ── 404 ───────────────────────────────────────────────────────────

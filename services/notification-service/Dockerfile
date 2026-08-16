@@ -1,4 +1,4 @@
-# services/presence-service/Dockerfile
+# services/notification-service/Dockerfile
 # Layout monorepo (services/...) : les requires relatifs
 # (../../../node_modules/.prisma/client) fonctionnent à l'identique.
 FROM node:20-alpine
@@ -9,16 +9,16 @@ WORKDIR /app
 # Dépendances racine (prisma, @prisma/client) puis dépendances du service
 COPY package*.json ./
 RUN npm ci
-COPY services/presence-service/package*.json ./services/presence-service/
-RUN cd services/presence-service && npm ci
+COPY services/notification-service/package*.json ./services/notification-service/
+RUN cd services/notification-service && npm ci
 
 # Schéma Prisma partagé + code du service
 COPY shared/ ./shared/
-COPY services/presence-service/ ./services/presence-service/
+COPY services/notification-service/ ./services/notification-service/
 
 # Génération du client Prisma à la racine (chemin attendu par le code)
 RUN npx prisma generate --schema=shared/prisma/schema.prisma
 
-EXPOSE 3004
+EXPOSE 3003
 
-CMD ["node", "services/presence-service/src/index.js"]
+CMD ["node", "services/notification-service/src/index.js"]

@@ -146,7 +146,11 @@ const CascadeController = {
       const etab = await prisma.etablissement.findUnique({ where: { id: req.params.id } });
       if (!etab) return res.status(404).json({ error: 'Établissement introuvable' });
 
-      const nouveauPlan = etab.plan === 'premium' ? 'free' : 'premium';
+      // Cycle : free → pro → institution → free (premium legacy bascule vers free)
+      const ordre = ['free', 'pro', 'institution'];
+      const index = ordre.indexOf(etab.plan);
+      const nouveauPlan = index === -1 ? 'free' : ordre[(index + 1) % ordre.length];
+
       const updated = await prisma.etablissement.update({
         where: { id: req.params.id },
         data:  { plan: nouveauPlan },
@@ -505,14 +509,14 @@ maClasse: async (req, res) => {
           classes,
           etudiants,
         },
-        limites: etab.plan === 'premium' ? null : {
+        limites: etab.plan === 'free' ? {
           maxEtudiants:    50,
           maxClasses:      3,
           maxDepartements: 1,
           sondages:        false,
           chatbot:         false,
           exportPdf:       false,
-        },
+        } : null,
       });
     } catch (err) {
       return res.status(500).json({ error: 'Erreur serveur' });

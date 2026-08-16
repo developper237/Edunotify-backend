@@ -1,5 +1,8 @@
 
-require('dotenv').config({ path: require('path').resolve(__dirname, '.env') });
+const path = require('path');
+// .env local au service, puis .env racine du repo en repli (dev)
+require('dotenv').config({ path: path.resolve(__dirname, '.env') });
+require('dotenv').config({ path: path.resolve(__dirname, '../../../.env') });
 
 const express    = require('express');
 const cors       = require('cors');

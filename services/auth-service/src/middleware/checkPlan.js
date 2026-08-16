@@ -13,6 +13,9 @@ const LIMITES_FREE = {
   exportPdf:       false,
 };
 
+// Tous les plans payants (legacy premium + pro + institution) ont accès complet
+const PLANS_PAYANTS = new Set(['premium', 'pro', 'institution']);
+
 const checkPlan = (feature) => async (req, res, next) => {
   try {
     const etab = await prisma.etablissement.findUnique({
@@ -21,7 +24,7 @@ const checkPlan = (feature) => async (req, res, next) => {
     });
 
     if (!etab) return res.status(403).json({ error: 'Établissement introuvable' });
-    if (etab.plan === 'premium') return next();
+    if (PLANS_PAYANTS.has(etab.plan)) return next();
 
     // Plan gratuit — vérifier la limite
     const limite = LIMITES_FREE[feature];

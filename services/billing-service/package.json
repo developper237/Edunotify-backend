@@ -1,0 +1,32 @@
+{
+  "name": "billing-service",
+  "version": "1.0.0",
+  "description": "EduNotify Billing Service — abonnements, facturation, paiement Mobile Money (CinetPay)",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "db:generate": "prisma generate --schema=../../shared/prisma/schema.prisma",
+    "db:migrate": "prisma migrate deploy --schema=../../shared/prisma/schema.prisma",
+    "db:push": "prisma db push --schema=../../shared/prisma/schema.prisma",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "axios": "^1.7.9",
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "express": "^4.22.1",
+    "express-validator": "^7.3.1",
+    "helmet": "^7.2.0",
+    "morgan": "^1.10.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0",
+    "prisma": "^5.22.0"
+  }
+}

@@ -1,4 +1,3 @@
-﻿
 # ── Dépendances Node ─────────────────────────────────────────────
 
 node_modules/
@@ -6,6 +5,7 @@ node_modules/
 **/node_modules/
 
 # ── Variables d'environnement ─────────────────────────────────────
+# .env* est ignoré, MAIS .env.example est versionné (modèle de référence)
 
 .env
 
@@ -15,7 +15,7 @@ node_modules/
 
 **/.env.*
 
-secrets/
+!.env.example
 
 # ── Prisma generated (binaires plateforme-spécifiques) ───────────
 
@@ -60,5 +60,12 @@ desktop.ini
 *.njsproj
 
 *.sln
+
 services/auth-service/uploads/
-secrets/firebase-service-account.json 
+
+# ── Credentials Firebase (JAMAIS commités !) ──────────────────────
+
+secrets/
+firebase-service-account.json
+smartcampus-*.json
+*.service-account.json

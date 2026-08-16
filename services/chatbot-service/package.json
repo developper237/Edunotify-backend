@@ -1,24 +1,27 @@
 {
   "name": "chatbot-service",
   "version": "1.0.0",
-  "description": "",
+  "description": "EduNotify Chatbot Service (Gemini)",
   "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-     "dev": "nodemon server.js",
-  "start": "node server.js"
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "db:generate": "prisma generate --schema=../../shared/prisma/schema.prisma",
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
-  "devDependencies": {
-    "nodemon": "^3.1.14"
-  },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
+    "@prisma/client": "^5.22.0",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14",
+    "prisma": "^5.22.0"
   }
 }

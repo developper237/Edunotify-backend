@@ -1,0 +1,31 @@
+# ── Exclusions du contexte de build Docker ──────────────────────
+# ⚠️ CRITIQUE : ne jamais copier les credentials Firebase dans une image !
+firebase-service-account.json
+smartcampus-*.json
+secrets/
+
+# Dépendances et caches
+node_modules/
+**/node_modules/
+**/.prisma/
+**/.cache/
+
+# Environnement
+.env
+.env.*
+**/.env
+**/.env.*
+
+# Git et OS
+.git/
+.gitignore
+.dockerignore
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Fichiers temporaires
+*.md
