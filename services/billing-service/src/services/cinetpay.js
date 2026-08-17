@@ -12,7 +12,10 @@
 //
 //  ── Ancienne API v2 (site_id + apikey) ────────────────────────────
 //     Paiement: POST https://api.cinetpay.com/v2/payment
-//     Vérif. : POST https://api.cinetpay.com/v2/check
+//     Vérif. : POST https://api.cinetpay.com/v2/payment/check
+//     ⚠️  Domaine derrière le WAF Cloudflare (challenge anti-bot) —
+//     utilisable uniquement depuis certains réseaux. La nouvelle API
+//     (clés sk_...) est recommandée.
 //
 // Env requises :
 //   Nouvelle API : CINETPAY_API_KEY (sk_...), CINETPAY_API_PASSWORD
@@ -31,6 +34,7 @@ const baseUrl = () => {
     const live = (process.env.CINETPAY_API_KEY || '').startsWith('sk_live_');
     return live ? 'https://api.cinetpay.co' : 'https://api.cinetpay.net';
   }
+  // API v2 : api.cinetpay.com (attention, derrière le WAF Cloudflare)
   return 'https://api.cinetpay.com';
 };
 
@@ -134,12 +138,17 @@ const initierPaiement = async ({ numero, montantXAF, description, email, telepho
     customer_surname: 'Établissement',
     customer_email: email   || 'paiement@edunotify.cm',
     customer_phone: telephone || '',
+    lang:           'fr',
   };
 
   let data;
   try {
     const resp = await axios.post(`${baseUrl()}/v2/payment`, body, {
       timeout: 20000,
+      headers: {
+        'User-Agent': 'EduNotify-Billing/1.0',
+        Accept: 'application/json',
+      },
     });
     data = resp.data;
   } catch (err) {
@@ -148,7 +157,8 @@ const initierPaiement = async ({ numero, montantXAF, description, email, telepho
     throw new Error(`CinetPay v2: HTTP ${err.response?.status} — ${d}`);
   }
 
-  const ok = data?.data?.payment_url && (data.code === '201' || data.code === '200');
+  // v2 répond code '00' (succès), parfois '201'/'200' selon les versions
+  const ok = data?.data?.payment_url && ['00', '201', '200'].includes(String(data.code));
   if (!ok) {
     throw new Error(`CinetPay: ${data?.message || 'réponse inattendue'} (code ${data?.code})`);
   }
@@ -183,9 +193,15 @@ const verifierPaiement = async (transactionId) => {
 
   // ── Ancienne API v2 ──
   const { data } = await axios.post(
-    `${baseUrl()}/v2/check`,
+    `${baseUrl()}/v2/payment/check`,
     { ...creds(), transaction_id: transactionId },
-    { timeout: 20000 }
+    {
+      timeout: 20000,
+      headers: {
+        'User-Agent': 'EduNotify-Billing/1.0',
+        Accept: 'application/json',
+      },
+    }
   );
 
   return {
