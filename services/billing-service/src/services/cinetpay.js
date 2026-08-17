@@ -136,9 +136,17 @@ const initierPaiement = async ({ numero, montantXAF, description, email, telepho
     customer_phone: telephone || '',
   };
 
-  const { data } = await axios.post(`${baseUrl()}/v2/payment`, body, {
-    timeout: 20000,
-  });
+  let data;
+  try {
+    const resp = await axios.post(`${baseUrl()}/v2/payment`, body, {
+      timeout: 20000,
+    });
+    data = resp.data;
+  } catch (err) {
+    const detail = err.response?.data;
+    const d = typeof detail === 'string' ? detail : JSON.stringify(detail || {});
+    throw new Error(`CinetPay v2: HTTP ${err.response?.status} — ${d}`);
+  }
 
   const ok = data?.data?.payment_url && (data.code === '201' || data.code === '200');
   if (!ok) {
