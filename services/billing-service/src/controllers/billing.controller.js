@@ -315,26 +315,31 @@ const annulerAbonnement = async (req, res) => {
 
 const webhookCinetpay = async (req, res) => {
   try {
-    const { cpm_trans_id, cpm_trans_status } = req.body || {};
-    if (!cpm_trans_id)
-      return res.status(400).json({ error: 'cpm_trans_id manquant' });
+    // Formats supportés : ancienne API v2 (cpm_trans_id/cpm_trans_status)
+    // et nouvelle API (merchant_transaction_id/status ou transaction_id).
+    const body = req.body || {};
+    const transId = body.cpm_trans_id
+      || body.merchant_transaction_id
+      || body.transaction_id;
+    if (!transId)
+      return res.status(400).json({ error: 'Identifiant de transaction manquant' });
 
-    let facture = await prisma.invoice.findUnique({ where: { numero: cpm_trans_id } });
+    let facture = await prisma.invoice.findUnique({ where: { numero: transId } });
     if (!facture) {
-      facture = await prisma.invoice.findFirst({ where: { referencePaiement: cpm_trans_id } });
+      facture = await prisma.invoice.findFirst({ where: { referencePaiement: transId } });
     }
     if (!facture)
       return res.status(404).json({ error: 'Facture inconnue' });
 
     // Vérification serveur (ne jamais se fier à l'IPN seul)
-    let statut = cpm_trans_status;
+    let statut = body.cpm_trans_status || body.status;
     try {
-      statut = (await verifierPaiement(cpm_trans_id)).status;
+      statut = (await verifierPaiement(transId)).status;
     } catch (err) {
       console.warn('[Webhook] Vérification CinetPay impossible, repli sur l\'IPN:', err.message);
     }
 
-    if (statut === 'ACCEPTED') {
+    if (statut === 'ACCEPTED' || statut === 'SUCCESS') {
       await prisma.invoice.update({
         where: { id: facture.id },
         data:  { statut: 'payee', payeeLe: new Date() },
@@ -343,7 +348,7 @@ const webhookCinetpay = async (req, res) => {
       return res.json({ message: 'Paiement confirmé', statut: 'payee' });
     }
 
-    if (statut === 'REFUSED' || statut === 'CANCELED') {
+    if (statut === 'REFUSED' || statut === 'CANCELED' || statut === 'FAILED' || statut === 'EXPIRED') {
       await prisma.invoice.update({
         where: { id: facture.id },
         data:  { statut: 'echouee' },

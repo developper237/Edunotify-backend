@@ -1,32 +1,80 @@
 // services/billing-service/src/services/cinetpay.js
-// Client CinetPay v2 — paiement Mobile Money (MTN MoMo / Orange Money).
-// Docs : https://dev.cinetpay.com (API v2)
+// Client CinetPay — paiement Mobile Money (MTN MoMo / Orange Money).
 //
-//   Initier un paiement  : POST https://api.cinetpay.com/v2/payment
-//   Vérifier une transac. : POST https://api.cinetpay.com/v2/check
-//   IPN (webhook)        : CinetPay appelle notre notify_url avec les
-//                          champs cpm_* (cpm_trans_id, cpm_trans_status...)
+// Deux générations d'API sont supportées, détectées automatiquement :
+//
+//  ── Nouvelle API (clés sk_test_ / sk_live_) ────────────────────────
+//     Auth   : POST /v1/oauth/login  { api_key, api_password } → access_token
+//     Paiement: POST /v1/payment      (Bearer) → payment_token / payment_url
+//     Vérif. : GET  /v1/payment/{merchant_transaction_id}
+//     Sandbox : api.cinetpay.net   / secure.cinetpay.net
+//     Prod    : api.cinetpay.co    / secure.cinetpay.co
+//
+//  ── Ancienne API v2 (site_id + apikey) ────────────────────────────
+//     Paiement: POST https://api.cinetpay.com/v2/payment
+//     Vérif. : POST https://api.cinetpay.com/v2/check
+//
+// Env requises :
+//   Nouvelle API : CINETPAY_API_KEY (sk_...), CINETPAY_API_PASSWORD
+//   Ancienne API : CINETPAY_API_KEY, CINETPAY_SITE_ID
+//   Les deux     : CINETPAY_NOTIFY_URL, CINETPAY_RETURN_URL (optionnel)
 
 const axios = require('axios');
 
-const CINETPAY_API = 'https://api.cinetpay.com/v2';
+// ── Détection de l'API ─────────────────────────────────────────────
+
+const estNouvelleAPI = () =>
+  !!(process.env.CINETPAY_API_KEY || '').startsWith('sk_');
+
+const baseUrl = () => {
+  if (estNouvelleAPI()) {
+    const live = (process.env.CINETPAY_API_KEY || '').startsWith('sk_live_');
+    return live ? 'https://api.cinetpay.co' : 'https://api.cinetpay.net';
+  }
+  return 'https://api.cinetpay.com';
+};
 
 const creds = () => {
-  const apikey = process.env.CINETPAY_API_KEY;
-  const siteId = process.env.CINETPAY_SITE_ID;
-  if (!apikey || !siteId) {
-    throw new Error('CINETPAY_API_KEY / CINETPAY_SITE_ID manquants');
+  const apiKey = process.env.CINETPAY_API_KEY;
+  if (!apiKey) throw new Error('CINETPAY_API_KEY manquant');
+
+  if (estNouvelleAPI()) {
+    if (!process.env.CINETPAY_API_PASSWORD)
+      throw new Error('CINETPAY_API_PASSWORD manquant (nouvelle API)');
+    return { api_key: apiKey, api_password: process.env.CINETPAY_API_PASSWORD };
   }
-  return { apikey, site_id: siteId };
+  if (!process.env.CINETPAY_SITE_ID)
+    throw new Error('CINETPAY_SITE_ID manquant (ancienne API v2)');
+  return { apikey: apiKey, site_id: process.env.CINETPAY_SITE_ID };
+};
+
+// ── Auth (nouvelle API) ────────────────────────────────────────────
+
+let tokenCache = null;
+
+const obtenirAccessToken = async () => {
+  if (tokenCache) return tokenCache;
+  const { api_key, api_password } = creds();
+  const { data } = await axios.post(
+    `${baseUrl()}/v1/oauth/login`,
+    { api_key, api_password },
+    { timeout: 20000 }
+  );
+  if (!data?.access_token)
+    throw new Error(`CinetPay auth: ${data?.message || 'réponse inattendue'}`);
+  tokenCache = data.access_token;
+  return tokenCache;
 };
 
 // methode: 'mtn_momo' | 'orange_money'
 const channelDe = (methode) => (methode === 'orange_money' ? 'ORANGE' : 'MTN');
 
+// ── Initier un paiement ────────────────────────────────────────────
+
 /**
  * Initie un paiement CinetPay et renvoie l'URL de paiement.
  * @param {object} p
- * @param {string} p.numero      transaction_id unique (numero de facture)
+ * @param {string} p.numero      identifiant marchand unique (numero de facture)
  * @param {number} p.montantXAF  montant en FCFA
  * @param {string} p.description
  * @param {string} [p.email]
@@ -34,14 +82,52 @@ const channelDe = (methode) => (methode === 'orange_money' ? 'ORANGE' : 'MTN');
  * @param {'mtn_momo'|'orange_money'} [p.methode]
  */
 const initierPaiement = async ({ numero, montantXAF, description, email, telephone, methode }) => {
+  const notifyUrl = process.env.CINETPAY_NOTIFY_URL;
+  if (!notifyUrl) throw new Error('CINETPAY_NOTIFY_URL manquant (URL publique IPN)');
+
+  const returnUrl =
+    process.env.CINETPAY_RETURN_URL || process.env.APP_URL || 'https://edunotify.cm';
+
+  if (estNouvelleAPI()) {
+    const token = await obtenirAccessToken();
+    const { data } = await axios.post(
+      `${baseUrl()}/v1/payment`,
+      {
+        currency: 'XAF',
+        merchant_transaction_id: numero,
+        amount: montantXAF,
+        lang: 'fr',
+        designation: description || 'Abonnement EduNotify',
+        client_email: email || 'paiement@edunotify.cm',
+        client_first_name: 'EduNotify',
+        client_last_name: 'Établissement',
+        client_phone_number: telephone || '',
+        success_url: returnUrl,
+        failed_url: returnUrl,
+        notify_url: notifyUrl,
+        channel: methode ? channelDe(methode) : 'PUSH',
+        direct_pay: false,
+      },
+      { headers: { Authorization: `Bearer ${token}` }, timeout: 20000 }
+    );
+
+    const url   = data?.payment_url || data?.data?.payment_url;
+    const tokenPaiement = data?.payment_token || data?.data?.payment_token;
+    if (!url)
+      throw new Error(`CinetPay: ${data?.message || data?.status || 'réponse inattendue'}`);
+
+    return { url, token: tokenPaiement || null };
+  }
+
+  // ── Ancienne API v2 ──
   const body = {
     ...creds(),
     transaction_id: numero,
     amount:         montantXAF,
     currency:       'XAF',
     description:    description || 'Abonnement EduNotify',
-    notify_url:     process.env.CINETPAY_NOTIFY_URL,
-    return_url:     process.env.CINETPAY_RETURN_URL || process.env.APP_URL || 'https://edunotify.cm',
+    notify_url:     notifyUrl,
+    return_url:     returnUrl,
     channels:       methode ? channelDe(methode) : 'MOBILE_MONEY',
     customer_id:    numero,
     customer_name:  'EduNotify',
@@ -50,7 +136,7 @@ const initierPaiement = async ({ numero, montantXAF, description, email, telepho
     customer_phone: telephone || '',
   };
 
-  const { data } = await axios.post(`${CINETPAY_API}/payment`, body, {
+  const { data } = await axios.post(`${baseUrl()}/v2/payment`, body, {
     timeout: 20000,
   });
 
@@ -65,13 +151,31 @@ const initierPaiement = async ({ numero, montantXAF, description, email, telepho
   };
 };
 
+// ── Vérifier une transaction ───────────────────────────────────────
+
 /**
  * Vérifie l'état d'une transaction auprès de CinetPay.
- * @returns {Promise<{status: 'ACCEPTED'|'REFUSED'|'PENDING'|string, raw: object}>}
+ * Retourne un statut normalisé : ACCEPTED | REFUSED | PENDING | ...
+ * @param {string} transactionId  identifiant marchand (numero de facture)
  */
 const verifierPaiement = async (transactionId) => {
+  if (estNouvelleAPI()) {
+    const token = await obtenirAccessToken();
+    const { data } = await axios.get(
+      `${baseUrl()}/v1/payment/${encodeURIComponent(transactionId)}`,
+      { headers: { Authorization: `Bearer ${token}` }, timeout: 20000 }
+    );
+    // La nouvelle API répond { code: 100, status: 'SUCCESS', ... }
+    const brut = data?.status || 'PENDING';
+    const statut = brut === 'SUCCESS' ? 'ACCEPTED'
+      : ['FAILED', 'INSUFFICIENT_BALANCE', 'EXPIRED'].includes(brut) ? 'REFUSED'
+      : 'PENDING';
+    return { status: statut, raw: data || {} };
+  }
+
+  // ── Ancienne API v2 ──
   const { data } = await axios.post(
-    `${CINETPAY_API}/check`,
+    `${baseUrl()}/v2/check`,
     { ...creds(), transaction_id: transactionId },
     { timeout: 20000 }
   );
