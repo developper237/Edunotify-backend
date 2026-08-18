@@ -82,11 +82,13 @@ router.get('/stats',
   requireRole('super_admin'),
   async (req, res) => {
     try {
-      const [nbEtabs, nbUsers, nbSessions, nbPremium] = await Promise.all([
+      const [nbEtabs, nbUsers, nbSessions, nbFree, nbPro, nbInstitution] = await Promise.all([
         prisma.etablissement.count(),
         prisma.user.count({ where: { role: { not: 'super_admin' } } }),
         prisma.sessionPresence.count(),
-        prisma.etablissement.count({ where: { plan: 'premium' } }),
+        prisma.etablissement.count({ where: { plan: 'free' } }),
+        prisma.etablissement.count({ where: { plan: 'pro' } }),
+        prisma.etablissement.count({ where: { plan: 'institution' } }),
       ]);
 
       const etablissements = await prisma.etablissement.findMany({
@@ -142,7 +144,9 @@ router.get('/stats',
           nbEtablissements: nbEtabs,
           nbUtilisateurs:   nbUsers,
           nbSessions:       nbSessions,
-          nbPremium,
+          nbFree,
+          nbPro,
+          nbInstitution,
         },
         etablissements: statsEtabs,
       });
