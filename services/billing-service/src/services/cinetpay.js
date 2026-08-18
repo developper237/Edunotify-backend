@@ -86,11 +86,11 @@ const channelDe = (methode) => (methode === 'orange_money' ? 'ORANGE' : 'MTN');
  * @param {'mtn_momo'|'orange_money'} [p.methode]
  */
 const initierPaiement = async ({ numero, montantXAF, description, email, telephone, methode }) => {
-  const notifyUrl = process.env.CINETPAY_NOTIFY_URL;
-  if (!notifyUrl) throw new Error('CINETPAY_NOTIFY_URL manquant (URL publique IPN)');
+  const notifyUrl = process.env.CINETPAY_NOTIFY_URL
+    || 'https://billing-service-36of.onrender.com/billing/webhooks/cinetpay';
 
   const returnUrl =
-    process.env.CINETPAY_RETURN_URL || process.env.APP_URL || 'https://edunotify.cm';
+    process.env.CINETPAY_RETURN_URL || process.env.APP_URL || 'https://billing-service-36of.onrender.com/billing/retour';
 
   if (estNouvelleAPI()) {
     const token = await obtenirAccessToken();
