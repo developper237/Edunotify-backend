@@ -37,8 +37,8 @@ services:
         sync: false
       # URL publique du webhook (IPN) — CinetPay y enverra les confirmations
       - key: CINETPAY_NOTIFY_URL
-        value: https://billing-service.onrender.com/billing/webhooks/cinetpay
+        value: https://billing-service-36of.onrender.com/billing/webhooks/cinetpay
       - key: CINETPAY_RETURN_URL
-        value: https://billing-service.onrender.com/billing/retour
+        value: https://billing-service-36of.onrender.com/billing/retour
       - key: APP_URL
-        value: https://billing-service.onrender.com
+        value: https://billing-service-36of.onrender.com
