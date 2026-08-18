@@ -11,6 +11,7 @@ const authRoutes    = require('./routes/auth.routes');
 const accountRoutes = require('./routes/account.routes');
 const cascadeRoutes = require('./routes/cascade.routes');
 const csvRoutes     = require('./routes/csv.routes');
+const leadRoutes    = require('./routes/lead.routes');
 const { connectDB } = require('./utils/db');
 const EmailService  = require('../../../shared/email/emailService');
 
@@ -42,6 +43,7 @@ app.use('/auth/login', loginLimiter);
 
 // ── Routes ────────────────────────────────────────────────────────
 app.use('/auth', authRoutes);
+app.use('/auth', leadRoutes);
 app.use('/auth/accounts', accountRoutes);
 app.use('/auth/cascade', cascadeRoutes);
 app.use('/auth/csv', csvRoutes);

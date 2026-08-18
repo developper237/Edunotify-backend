@@ -382,6 +382,52 @@ const templates = {
       </p>
     `),
 
+  // ── Demande de création d'établissement (landing page) ─────────────
+  leadRequest: ({ etablissementNom, ville, prenomAdmin, nomAdmin, emailAdmin, planLabel }) =>
+    baseTemplate(`
+      <span class="badge orange">Nouvelle demande</span>
+      <h2>Demande de création d'établissement</h2>
+      <p>Un responsable a soumis une demande d'inscription depuis la landing page SmartCampus.</p>
+
+      <div class="credentials">
+        <div class="row">
+          <div class="label">Établissement</div>
+          <div class="value">${etablissementNom}</div>
+        </div>
+        <div class="row">
+          <div class="label">Ville</div>
+          <div class="value">${ville}</div>
+        </div>
+        <div class="row">
+          <div class="label">Plan choisi</div>
+          <div class="value highlight">${planLabel}</div>
+        </div>
+        <div class="row">
+          <div class="label">Administrateur</div>
+          <div class="value">${prenomAdmin} ${nomAdmin}</div>
+        </div>
+        <div class="row">
+          <div class="label">Email de l'établissement</div>
+          <div class="value highlight">${emailAdmin}</div>
+        </div>
+      </div>
+
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-text">Contactez ${prenomAdmin} sous 24 h pour finaliser les modalités d'inscription</div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-text">Créez l'établissement et le compte administrateur (identifiants envoyés à ${emailAdmin})</div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-text">Activez le plan ${planLabel} et l'essai gratuit de 14 jours</div>
+        </div>
+      </div>
+    `),
+
   // ── Code de réinitialisation de mot de passe (mot de passe oublié) ──
   passwordReset: ({ prenom, code }) =>
     baseTemplate(`
@@ -407,7 +453,7 @@ const templates = {
 const sendEmail = async ({ to, subject, html }) => {
   try {
     const info = await transporter.sendMail({
-      from: `"SmartCampus" <${process.env.EMAIL_FROM}>`,
+      from: `"SmartCampus" <${process.env.EMAIL_FROM || process.env.GMAIL_USER}>`,
       to,
       subject,
       html,
@@ -462,6 +508,14 @@ const EmailService = {
       to:      data.email,
       subject: '[SmartCampus] Votre code de réinitialisation de mot de passe',
       html:    templates.passwordReset(data),
+    }),
+
+  // Demande de création d'établissement depuis la landing page
+  sendLeadRequest: (data) =>
+    sendEmail({
+      to:      process.env.LEAD_EMAIL || 'sergende695@outlook.fr',
+      subject: `[SmartCampus] Nouvelle demande d'établissement — ${data.etablissementNom}`,
+      html:    templates.leadRequest(data),
     }),
 
   // Envoyer en masse (CSV import)
