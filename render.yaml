@@ -12,11 +12,12 @@
 services:
   - type: web
     name: billing-service
-    runtime: node
+    runtime: docker
     repo: https://github.com/developper237/Edunotify-backend
-    rootDir: services/billing-service
-    buildCommand: npm install && cd ../.. && npm install @prisma/client@5.22.0 && cd services/billing-service && npx prisma@5.22.0 generate --schema=../../shared/prisma/schema.prisma
-    startCommand: node src/index.js
+    # Racine du monorepo : le Dockerfile copie shared/ et services/… donc
+    # le contexte de build doit être la racine du dépôt.
+    rootDir: .
+    dockerfilePath: services/billing-service/Dockerfile
     plan: starter
     healthCheckPath: /health
     envVars:

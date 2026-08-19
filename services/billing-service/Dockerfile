@@ -8,9 +8,9 @@ WORKDIR /app
 
 # Dépendances racine (prisma, @prisma/client) puis dépendances du service
 COPY package*.json ./
-RUN npm install --omit=dev
+RUN npm ci
 COPY services/billing-service/package*.json ./services/billing-service/
-RUN cd services/billing-service && npm install --omit=dev
+RUN cd services/billing-service && npm ci
 
 # Schéma Prisma partagé + code du service
 COPY shared/ ./shared/
