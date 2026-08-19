@@ -16,7 +16,6 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "@fapshi/payments": "^1.0.0",
     "@prisma/client": "^5.22.0",
     "axios": "^1.7.9",
     "cors": "^2.8.6",
