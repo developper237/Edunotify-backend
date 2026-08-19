@@ -1,7 +1,8 @@
 // services/billing-service/src/controllers/billing.controller.js
 
 const { prisma } = require('../utils/db');
-const { initierPaiement, verifierPaiement } = require('../services/cinetpay');
+const fapshi = require('../services/fapshi');
+const cinetpay = require('../services/cinetpay');
 
 const ESSAI_GRATUIT_JOURS = 14;
 
@@ -158,20 +159,36 @@ const creerAbonnement = async (req, res) => {
 
     // Paiement immédiat si une méthode est fournie
     let paiementUrl = null;
+    let providerUtilise = null;
     if (methodePaiement) {
+      // Fapshi en primaire, CinetPay en fallback
       try {
-        const p = await initierPaiement({
+        const p = await fapshi.initierPaiement({
           numero, montantXAF: prixXAF,
           description: `Abonnement ${plan.nom} EduNotify — période ${cycle}`,
           email, telephone, methode: methodePaiement,
         });
         paiementUrl = p.url;
+        providerUtilise = 'fapshi';
+      } catch (errFapshi) {
+        console.warn('[Billing] Fapshi échoué, repli CinetPay:', errFapshi.message);
+        try {
+          const p = await cinetpay.initierPaiement({
+            numero, montantXAF: prixXAF,
+            description: `Abonnement ${plan.nom} EduNotify — période ${cycle}`,
+            email, telephone, methode: methodePaiement,
+          });
+          paiementUrl = p.url;
+          providerUtilise = 'cinetpay';
+        } catch (errCinetpay) {
+          console.error('[Billing] Tous les providers de paiement ont échoué:', errCinetpay.message);
+        }
+      }
+      if (paiementUrl) {
         await prisma.invoice.update({
           where: { id: facture.id },
           data:  { urlPaiement: paiementUrl, methodePaiement, referencePaiement: numero },
         });
-      } catch (err) {
-        console.error('[Billing] Initiation du paiement échouée:', err.message);
       }
     }
 
@@ -215,21 +232,35 @@ const initierPaiementFacture = async (req, res) => {
     if (!facture)
       return res.status(400).json({ error: 'Aucune facture en attente' });
 
-    const p = await initierPaiement({
-      numero: facture.numero, montantXAF: facture.montantXAF,
-      description: `Abonnement EduNotify — période ${facture.cycle}`,
-      email, telephone, methode: methodePaiement,
-    });
+    // Fapshi en primaire, CinetPay en fallback
+    let p = null;
+    let providerUtilise = null;
+    try {
+      p = await fapshi.initierPaiement({
+        numero: facture.numero, montantXAF: facture.montantXAF,
+        description: `Abonnement EduNotify — période ${facture.cycle}`,
+        email, telephone, methode: methodePaiement,
+      });
+      providerUtilise = 'fapshi';
+    } catch (errFapshi) {
+      console.warn('[Billing] Fapshi échoué pour facture, repli CinetPay:', errFapshi.message);
+      p = await cinetpay.initierPaiement({
+        numero: facture.numero, montantXAF: facture.montantXAF,
+        description: `Abonnement EduNotify — période ${facture.cycle}`,
+        email, telephone, methode: methodePaiement,
+      });
+      providerUtilise = 'cinetpay';
+    }
 
     await prisma.invoice.update({
       where: { id: facture.id },
       data:  { urlPaiement: p.url, methodePaiement, referencePaiement: facture.numero },
     });
 
-    return res.json({ paiementUrl: p.url, facture });
+    return res.json({ paiementUrl: p.url, provider: providerUtilise, facture });
   } catch (err) {
     console.error('[initierPaiementFacture]', err.message);
-    return res.status(502).json({ error: `CinetPay: ${err.message}` });
+    return res.status(502).json({ error: `Paiement: ${err.message}` });
   }
 };
 
@@ -305,6 +336,62 @@ const annulerAbonnement = async (req, res) => {
     });
   } catch (err) {
     console.error('[annulerAbonnement]', err.message);
+    return res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
+// ──────────────────────────────────────────────────────────────────
+// POST /billing/webhooks/fapshi — IPN Fapshi (route PUBLIQUE)
+// ──────────────────────────────────────────────────────────────────
+
+const webhookFapshi = async (req, res) => {
+  try {
+    const body = req.body || {};
+    // Fapshi envoie : { transId, status, externalId, ... }
+    const transId = body.transId || body.transaction_id;
+    if (!transId)
+      return res.status(400).json({ error: 'Identifiant de transaction manquant' });
+
+    let facture = await prisma.invoice.findFirst({ where: { referencePaiement: transId } });
+    if (!facture) {
+      facture = await prisma.invoice.findUnique({ where: { numero: transId } });
+    }
+    // Aussi chercher par externalId
+    if (!facture && body.externalId) {
+      facture = await prisma.invoice.findUnique({ where: { numero: body.externalId } });
+    }
+    if (!facture)
+      return res.status(404).json({ error: 'Facture inconnue' });
+
+    // Vérification serveur
+    let statut = body.status;
+    try {
+      const verification = await fapshi.verifierPaiement(transId);
+      statut = verification.status;
+    } catch (err) {
+      console.warn('[Webhook Fapshi] Vérification impossible, repli sur IPN:', err.message);
+    }
+
+    if (statut === 'ACCEPTED' || statut === 'SUCCESSFUL') {
+      await prisma.invoice.update({
+        where: { id: facture.id },
+        data:  { statut: 'payee', payeeLe: new Date() },
+      });
+      await activerAbonnement(facture.subscriptionId, facture.montantXAF, facture.cycle);
+      return res.json({ message: 'Paiement confirmé', statut: 'payee' });
+    }
+
+    if (statut === 'REFUSED' || statut === 'FAILED' || statut === 'EXPIRED') {
+      await prisma.invoice.update({
+        where: { id: facture.id },
+        data:  { statut: 'echouee' },
+      });
+      return res.json({ message: 'Paiement refusé', statut: 'echouee' });
+    }
+
+    return res.json({ message: 'Paiement en attente', statut: 'en_attente' });
+  } catch (err) {
+    console.error('[webhookFapshi]', err.message);
     return res.status(500).json({ error: 'Erreur serveur' });
   }
 };
@@ -421,6 +508,7 @@ module.exports = {
   initierPaiementFacture,
   getMonAbonnement,
   annulerAbonnement,
+  webhookFapshi,
   webhookCinetpay,
   verifierExpirations,
   verifierExpirationsRoute,

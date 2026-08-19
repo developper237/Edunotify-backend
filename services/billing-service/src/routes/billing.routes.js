@@ -5,7 +5,8 @@ const router  = express.Router();
 const { auth, requireRole } = require('../middleware/auth');
 const ctrl = require('../controllers/billing.controller');
 
-// ── Webhook CinetPay — PUBLIC (CinetPay n'a pas de JWT) ──────────
+// ── Webhooks Paiement — PUBLIC (pas de JWT) ──────────────────────
+router.post('/webhooks/fapshi', ctrl.webhookFapshi);
 router.post('/webhooks/cinetpay', ctrl.webhookCinetpay);
 
 // ── Retour utilisateur après paiement — PUBLIC ──────────────────
