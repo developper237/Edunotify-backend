@@ -1,51 +1,10 @@
 # ══════════════════════════════════════════════════════════════════
 # render.yaml — Blueprint Render pour EduNotify Backend
 #
-# Déploiement : Render Dashboard → "New +" → "Blueprint" →
-#               sélectionner le repo Edunotify-backend →
-#               compléter les variables marquées [À COMPLÉTER] → Apply
-#
-# ⚠️ Render ne gère que les services déclarés ici. Les autres services
-#    (auth, presence, notification, academic, chatbot) restent inchangés.
+# Le billing-service a été créé manuellement sur Render Dashboard.
+# Il se déploie via git push avec auto-deploy activé.
+# Ce fichier ne contient PAS de config pour billing-service
+# afin d'éviter les conflits de config (update_failed).
 # ══════════════════════════════════════════════════════════════════
 
-services:
-  - type: web
-    name: billing-service
-    runtime: docker
-    repo: https://github.com/developper237/Edunotify-backend
-    # Racine du monorepo : le Dockerfile copie shared/ et services/… donc
-    # le contexte de build doit être la racine du dépôt.
-    rootDir: .
-    dockerfilePath: services/billing-service/Dockerfile
-    plan: starter
-    healthCheckPath: /health
-    envVars:
-      - key: PORT
-        value: 10000
-      # ── [À COMPLÉTER] URL PostgreSQL de production (même base que les
-      #    autres services Render, ex: postgresql://user:pass@host:5432/db)
-      - key: DATABASE_URL
-        sync: false
-      # ── [À COMPLÉTER] Secret JWT (identique aux autres services)
-      - key: JWT_SECRET
-        sync: false
-      # ── [À COMPLÉTER] Clés CinetPay (cinetpay.com → API)
-      - key: CINETPAY_API_KEY
-        sync: false
-      - key: CINETPAY_SITE_ID
-        sync: false
-      # URL publique du webhook (IPN) — CinetPay y enverra les confirmations
-      - key: CINETPAY_NOTIFY_URL
-        value: https://billing-service-36of.onrender.com/billing/webhooks/cinetpay
-      - key: CINETPAY_RETURN_URL
-        value: https://billing-service-36of.onrender.com/billing/retour
-      - key: APP_URL
-        value: https://billing-service-36of.onrender.com
-      # ── Fapshi (provider principal)
-      - key: FAPSHI_API_USER
-        sync: false
-      - key: FAPSHI_API_KEY
-        sync: false
-      - key: FAPSHI_RETURN_URL
-        value: https://billing-service-36of.onrender.com/billing/retour
+services: []
