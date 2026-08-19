@@ -42,3 +42,10 @@ services:
         value: https://billing-service-36of.onrender.com/billing/retour
       - key: APP_URL
         value: https://billing-service-36of.onrender.com
+      # ── Fapshi (provider principal)
+      - key: FAPSHI_API_USER
+        sync: false
+      - key: FAPSHI_API_KEY
+        sync: false
+      - key: FAPSHI_RETURN_URL
+        value: https://billing-service-36of.onrender.com/billing/retour
