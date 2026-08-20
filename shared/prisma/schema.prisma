@@ -115,6 +115,9 @@ model Etablissement {
   notifications Notification[]
   abonnement    Subscription?
   factures      Invoice[]
+  documents     Document[]
+  sessionsExamen SessionExamen[]
+  groupesChat   GroupeChat[]
 }
 
 model Departement {
@@ -190,6 +193,12 @@ model User {
   requetesTraitees      RequeteNote[]              @relation("RequetesTraitees")
   publications          PublicationNotes[]         @relation("PublicationAuteur")
   chatMessages ChatMessage[]
+  documentsUploade Document[] @relation('DocUploadePar')
+  sessionsExamenCreees SessionExamen[] @relation('ProfSessions')
+  participantsExamen ParticipantExamen[]
+  groupesChatCrees GroupeChat[] @relation('GroupeCreePar')
+  membresGroupes MembreGroupe[]
+  messagesGroupes MessageGroupe[]
 }
 
 
@@ -515,4 +524,174 @@ model Invoice {
 
   @@index([etablissementId, createdAt])
   @@index([statut])
+}
+
+// ──────────────────────────────────────────────────────────────────
+// BIBLIOTHÈQUE
+// ──────────────────────────────────────────────────────────────────
+
+enum CategorieDocument {
+  anciennes_epreuves
+  rapports_stages
+  livres_scientifiques
+  cours
+  projets
+  autre
+}
+
+model Document {
+  id               String             @id @default(cuid())
+  nom              String
+  description      String?
+  categorie        CategorieDocument  @default(autre)
+  typeFichier      String             // pdf, doc, pptx, etc.
+  tailleOctets     Int
+  urlFichier       String             // chemin de stockage
+  thumbnailUrl     String?
+  etablissementId  String
+  uploadeParId     String
+  nbTelechargements Int               @default(0)
+  createdAt        DateTime           @default(now())
+
+  etablissement Etablissement @relation(fields: [etablissementId], references: [id], onDelete: Cascade)
+  uploadePar    User          @relation(fields: [uploadeParId], references: [id], onDelete: Cascade)
+
+  @@index([etablissementId, categorie])
+  @@index([nom])
+}
+
+// ──────────────────────────────────────────────────────────────────
+// SALLE D'EXAMEN
+// ──────────────────────────────────────────────────────────────────
+
+enum StatutExamen {
+  en_preparation
+  en_cours
+  termine
+  annule
+}
+
+enum StatutParticipantExamen {
+  connecte
+  en_cours
+  termine
+  invalide
+}
+
+model SessionExamen {
+  id             String           @id @default(cuid())
+  codeInvitation String           @unique
+  titre          String
+  matiere        String
+  description    String?
+  dureeMinutes   Int              // durée en minutes
+  debut          DateTime?
+  fin            DateTime?
+  statut         StatutExamen     @default(en_preparation)
+  profId         String
+  etablissementId String
+  createdAt      DateTime         @default(now())
+
+  prof         User          @relation(fields: [profId], references: [id])
+  etablissement Etablissement @relation(fields: [etablissementId], references: [id], onDelete: Cascade)
+  participants  ParticipantExamen[]
+  sujets        SujetExamen[]
+
+  @@index([codeInvitation])
+  @@index([profId])
+}
+
+model ParticipantExamen {
+  id              String                   @id @default(cuid())
+  sessionId       String
+  userId          String
+  avertissements  Int                      @default(0)   // max 5 (caméra) + 3 (quit)
+  score           Float?
+  statut          StatutParticipantExamen  @default(connecte)
+  connecteLe      DateTime                 @default(now())
+  deconnecteLe    DateTime?
+
+  session SessionExamen @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reponses ReponseExamen[]
+
+  @@unique([sessionId, userId])
+  @@index([sessionId])
+}
+
+model SujetExamen {
+  id          String   @id @default(cuid())
+  sessionId   String
+  intitule    String
+  enonce      String   // texte ou URL d'image
+  typeSujet   String   @default('qcm')  // qcm, texte_libre, calcul
+  options     Json?    // pour QCM : ["A", "B", "C", "D"]
+  points      Int      @default(1)
+  ordre       Int      @default(0)
+
+  session   SessionExamen    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  reponses  ReponseExamen[]
+
+  @@index([sessionId, ordre])
+}
+
+model ReponseExamen {
+  id            String   @id @default(cuid())
+  participantId String
+  sujetId       String
+  reponse       String   // réponse de l'étudiant
+  estCorrecte   Boolean?
+  pointsObtenus Int?
+  reponduLe     DateTime @default(now())
+
+  participant ParticipantExamen @relation(fields: [participantId], references: [id], onDelete: Cascade)
+  sujet       SujetExamen       @relation(fields: [sujetId], references: [id], onDelete: Cascade)
+
+  @@unique([participantId, sujetId])
+}
+
+// ──────────────────────────────────────────────────────────────────
+// CHAT DE GROUPE
+// ──────────────────────────────────────────────────────────────────
+
+model GroupeChat {
+  id              String   @id @default(cuid())
+  nom             String
+  etablissementId String
+  classeId        String?
+  creeParId       String
+  createdAt       DateTime @default(now())
+
+  etablissement Etablissement @relation(fields: [etablissementId], references: [id], onDelete: Cascade)
+  creePar       User          @relation(fields: [creeParId], references: [id])
+  membres       MembreGroupe[]
+  messages      MessageGroupe[]
+
+  @@index([etablissementId])
+}
+
+model MembreGroupe {
+  id        String   @id @default(cuid())
+  groupId   String
+  userId    String
+  joinedAt  DateTime @default(now())
+
+  groupe GroupeChat @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user   User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId])
+}
+
+model MessageGroupe {
+  id        String   @id @default(cuid())
+  groupId   String
+  userId    String
+  texte     String
+  luPar     Json?    // tableau d'ids d'utilisateurs qui ont lu
+  createdAt DateTime @default(now())
+
+  groupe GroupeChat @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user   User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([groupId, createdAt])
 }
