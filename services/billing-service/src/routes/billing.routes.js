@@ -37,8 +37,15 @@ router.get('/subscription', ctrl.getMonAbonnement);
 // Souscrire / changer de plan (admin ou super_admin)
 router.post('/subscriptions', requireRole('admin', 'super_admin'), ctrl.creerAbonnement);
 
-// Payer une facture en attente (admin ou super_admin)
+// Payer une facture en attente — URL redirect (admin ou super_admin)
 router.post('/subscriptions/:id/payer', requireRole('admin', 'super_admin'), ctrl.initierPaiementFacture);
+
+// Payer une facture en attente — Direct Pay (push MoMo/OM, pas de redirect)
+// Body: { methodePaiement, telephone, email? }
+router.post('/subscriptions/:id/payer-direct', requireRole('admin', 'super_admin'), ctrl.initierPaiementDirect);
+
+// Vérifier le statut d'un paiement en cours
+router.get('/payment-status/:transId', requireRole('admin', 'super_admin', 'super_admin'), ctrl.verifierStatutPaiement);
 
 // Annuler l'abonnement (admin ou super_admin)
 router.post('/subscriptions/cancel', requireRole('admin', 'super_admin'), ctrl.annulerAbonnement);

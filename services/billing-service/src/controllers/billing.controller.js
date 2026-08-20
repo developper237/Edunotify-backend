@@ -265,6 +265,97 @@ const initierPaiementFacture = async (req, res) => {
 };
 
 // ──────────────────────────────────────────────────────────────────
+// POST /billing/subscriptions/:id/payer-direct — Direct Pay (sans redirect)
+// Body: { methodePaiement: 'mtn_momo'|'orange_money', telephone, email? }
+// L'utilisateur reçoit une notification sur son MoMo/OM et valide
+// directement sur son téléphone, sans quitter l'app.
+// ──────────────────────────────────────────────────────────────────
+
+const initierPaiementDirectCtrl = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { methodePaiement, telephone, email } = req.body;
+
+    if (!['mtn_momo', 'orange_money'].includes(methodePaiement))
+      return res.status(400).json({ error: 'Méthode de paiement invalide' });
+    if (!telephone)
+      return res.status(400).json({ error: 'Le numéro de téléphone est obligatoire pour le paiement direct' });
+
+    const sub = await prisma.subscription.findUnique({ where: { id } });
+    if (!sub || sub.etablissementId !== req.user.etablissementId)
+      return res.status(404).json({ error: 'Abonnement introuvable' });
+
+    const facture = await prisma.invoice.findFirst({
+      where:  { subscriptionId: sub.id, statut: 'en_attente' },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!facture)
+      return res.status(400).json({ error: 'Aucune facture en attente' });
+
+    // Fapshi Direct Pay en primaire
+    let transId = null;
+    let providerUtilise = null;
+    try {
+      const p = await fapshi.initierPaiementDirect({
+        numero: facture.numero, montantXAF: facture.montantXAF,
+        description: `Abonnement EduNotify — ${facture.cycle}`,
+        email, telephone, methode: methodePaiement,
+      });
+      transId = p.token;
+      providerUtilise = 'fapshi';
+    } catch (errFapshi) {
+      console.warn('[Billing] Fapshi Direct Pay échoué:', errFapshi.message);
+      return res.status(502).json({
+        error: `Paiement direct impossible: ${errFapshi.message}`,
+        hint: 'Vérifiez votre numéro et réessayez',
+      });
+    }
+
+    if (transId) {
+      await prisma.invoice.update({
+        where: { id: facture.id },
+        data:  { methodePaiement, referencePaiement: transId },
+      });
+    }
+
+    return res.json({
+      message: 'Demande de paiement envoyée sur votre téléphone. Validez le paiement sur votre MoMo/Orange Money.',
+      transactionId: transId,
+      provider: providerUtilise,
+      facture,
+    });
+  } catch (err) {
+    console.error('[initierPaiementDirectCtrl]', err.message);
+    return res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
+// ──────────────────────────────────────────────────────────────────
+// GET /billing/payment-status/:transId — vérifier le statut d'un paiement
+// ──────────────────────────────────────────────────────────────────
+
+const verifierStatutPaiement = async (req, res) => {
+  try {
+    const { transId } = req.params;
+    if (!transId)
+      return res.status(400).json({ error: 'Identifiant de transaction manquant' });
+
+    let statut = 'PENDING';
+    try {
+      const v = await fapshi.verifierPaiement(transId);
+      statut = v.status; // ACCEPTED | REFUSED | PENDING
+    } catch (err) {
+      console.warn('[verifierStatutPaiement] Fapshi:', err.message);
+    }
+
+    return res.json({ transactionId: transId, statut });
+  } catch (err) {
+    console.error('[verifierStatutPaiement]', err.message);
+    return res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
+// ──────────────────────────────────────────────────────────────────
 // GET /billing/subscription — état de l'abonnement de mon établissement
 // ──────────────────────────────────────────────────────────────────
 
@@ -506,6 +597,8 @@ module.exports = {
   listerPlans,
   creerAbonnement,
   initierPaiementFacture,
+  initierPaiementDirectCtrl,
+  verifierStatutPaiement,
   getMonAbonnement,
   annulerAbonnement,
   webhookFapshi,
