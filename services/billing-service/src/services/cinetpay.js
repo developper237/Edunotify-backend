@@ -87,10 +87,10 @@ const channelDe = (methode) => (methode === 'orange_money' ? 'ORANGE' : 'MTN');
  */
 const initierPaiement = async ({ numero, montantXAF, description, email, telephone, methode }) => {
   const notifyUrl = process.env.CINETPAY_NOTIFY_URL
-    || 'https://billing-service-36of.onrender.com/billing/webhooks/cinetpay';
+    || 'https://billing-service-efm6.onrender.com/billing/webhooks/cinetpay';
 
   const returnUrl =
-    process.env.CINETPAY_RETURN_URL || process.env.APP_URL || 'https://billing-service-36of.onrender.com/billing/retour';
+    process.env.CINETPAY_RETURN_URL || process.env.APP_URL || 'https://billing-service-efm6.onrender.com/billing/retour';
 
   if (estNouvelleAPI()) {
     const token = await obtenirAccessToken();

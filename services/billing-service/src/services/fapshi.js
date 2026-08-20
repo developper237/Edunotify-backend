@@ -99,7 +99,7 @@ const mediumDe = (methode) => {
  */
 const initierPaiement = async ({ numero, montantXAF, description, email, methode }) => {
   const returnUrl = process.env.FAPSHI_RETURN_URL
-    || 'https://billing-service-36of.onrender.com/billing/retour';
+    || 'https://billing-service-efm6.onrender.com/billing/retour';
 
   try {
     // POST /initiate-pay
