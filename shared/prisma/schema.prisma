@@ -193,10 +193,10 @@ model User {
   requetesTraitees      RequeteNote[]              @relation("RequetesTraitees")
   publications          PublicationNotes[]         @relation("PublicationAuteur")
   chatMessages ChatMessage[]
-  documentsUploade Document[] @relation('DocUploadePar')
-  sessionsExamenCreees SessionExamen[] @relation('ProfSessions')
+  documents Document[]
+  sessionsExamen SessionExamen[]
   participantsExamen ParticipantExamen[]
-  groupesChatCrees GroupeChat[] @relation('GroupeCreePar')
+  groupesChatCrees GroupeChat[]
   membresGroupes MembreGroupe[]
   messagesGroupes MessageGroupe[]
 }
@@ -623,9 +623,9 @@ model SujetExamen {
   id          String   @id @default(cuid())
   sessionId   String
   intitule    String
-  enonce      String   // texte ou URL d'image
-  typeSujet   String   @default('qcm')  // qcm, texte_libre, calcul
-  options     Json?    // pour QCM : ["A", "B", "C", "D"]
+  enonce      String
+  typeQuestion String  @default("qcm")
+  options     Json?
   points      Int      @default(1)
   ordre       Int      @default(0)
 
