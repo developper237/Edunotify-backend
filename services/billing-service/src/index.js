@@ -12,6 +12,8 @@ const morgan  = require('morgan');
 
 const { connectDB }    = require('./utils/db');
 const billingRoutes    = require('./routes/billing.routes');
+const libraryRoutes    = require('./routes/library.routes');
+const examRoutes       = require('./routes/exam.routes');
 const { semerPlans }   = require('./seed/plans');
 const { verifierExpirations } = require('./controllers/billing.controller');
 
@@ -26,6 +28,11 @@ app.use(express.json());
 
 // ── Routes ────────────────────────────────────────────────────────
 app.use('/billing', billingRoutes);
+app.use('/library', libraryRoutes);
+app.use('/exam', examRoutes);
+
+// Servir les fichiers uploadés (bibliothèque)
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // Health check
 app.get('/health', (_, res) => res.json({
