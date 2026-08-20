@@ -42,7 +42,7 @@ router.post('/subscriptions/:id/payer', requireRole('admin', 'super_admin'), ctr
 
 // Payer une facture en attente — Direct Pay (push MoMo/OM, pas de redirect)
 // Body: { methodePaiement, telephone, email? }
-router.post('/subscriptions/:id/payer-direct', requireRole('admin', 'super_admin'), ctrl.initierPaiementDirect);
+router.post('/subscriptions/:id/payer-direct', requireRole('admin', 'super_admin'), ctrl.initierPaiementDirectCtrl);
 
 // Vérifier le statut d'un paiement en cours
 router.get('/payment-status/:transId', requireRole('admin', 'super_admin', 'super_admin'), ctrl.verifierStatutPaiement);
