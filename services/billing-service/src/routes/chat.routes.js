@@ -2,9 +2,7 @@
 const express = require('express');
 const router  = express.Router();
 const { auth } = require('../middleware/auth');
-const { PrismaClient } = require('@prisma/client');
-
-const prisma = new PrismaClient();
+const { prisma } = require('../utils/db');
 
 // ── Tous les utilisateurs authentifiés peuvent accéder au chat ──
 router.use(auth);
