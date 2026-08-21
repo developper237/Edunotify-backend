@@ -35,6 +35,9 @@ router.get('/sessions/:id', ctrl.getSession);
 // Soumettre une réponse
 router.post('/sessions/:id/answer', ctrl.soumettreReponse);
 
+// Étudiant termine son examen (auto-correction + score)
+router.post('/sessions/:id/submit', ctrl.soumettreExamen);
+
 // Signaler un avertissement (caméra ou quit)
 router.post('/sessions/:id/warning', ctrl.signalerAvertissement);
 

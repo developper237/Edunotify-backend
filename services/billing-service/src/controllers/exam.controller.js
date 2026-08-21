@@ -71,6 +71,13 @@ const rejoindreSession = async (req, res) => {
     });
     if (!session) return res.status(404).json({ error: 'Session introuvable' });
     if (session.statut === 'termine' || session.statut === 'annule') {
+      // Vérifier si l'étudiant avait déjà participé
+      const existantAvant = await prisma.participantExamen.findUnique({
+        where: { sessionId_userId: { sessionId: session.id, userId } },
+      });
+      if (existantAvant) {
+        return res.status(400).json({ error: 'Cette session est terminée', dejaTermine: true, participant: existantAvant, session });
+      }
       return res.status(400).json({ error: 'Cette session est terminée' });
     }
 
@@ -213,7 +220,7 @@ const signalerAvertissement = async (req, res) => {
     const participant = await prisma.participantExamen.findUnique({
       where: { sessionId_userId: { sessionId: id, userId } },
     });
-    if (!participant || participant.statut !== 'en_cours') {
+    if (!participant || participant.statut === 'termine' || participant.statut === 'invalide') {
       return res.status(400).json({ error: 'Participant non actif' });
     }
 
@@ -401,6 +408,85 @@ const mesResultats = async (req, res) => {
   }
 };
 
+// ──────────────────────────────────────────────────────────────────
+// POST /exam/sessions/:id/submit — Étudiant termine son examen
+// Corrige ses réponses, calcule le score, passe le statut à termine
+// ──────────────────────────────────────────────────────────────────
+
+const soumettreExamen = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+
+    const participant = await prisma.participantExamen.findUnique({
+      where: { sessionId_userId: { sessionId: id, userId } },
+    });
+    if (!participant) {
+      return res.status(404).json({ error: 'Vous n\'êtes pas inscrit à cette session' });
+    }
+    if (participant.statut === 'termine') {
+      return res.status(400).json({ error: 'Vous avez déjà soumis cet examen' });
+    }
+    if (participant.statut === 'invalide') {
+      return res.status(403).json({ error: 'Votre session a été invalidée' });
+    }
+
+    // Charger les sujets de la session
+    const sujets = await prisma.sujetExamen.findMany({
+      where: { sessionId: id },
+      orderBy: { ordre: 'asc' },
+    });
+
+    // Charger les réponses du participant
+    const reponses = await prisma.reponseExamen.findMany({
+      where: { participantId: participant.id },
+    });
+
+    // Auto-correction
+    let score = 0;
+    const totalPoints = sujets.reduce((sum, s) => sum + s.points, 0);
+
+    for (const sujet of sujets) {
+      const rep = reponses.find(r => r.sujetId === sujet.id);
+      if (!rep) continue;
+
+      if (sujet.typeQuestion === 'qcm' && sujet.options) {
+        const correct = rep.reponse === sujet.options.correct;
+        await prisma.reponseExamen.update({
+          where: { id: rep.id },
+          data: { estCorrecte: correct, pointsObtenus: correct ? sujet.points : 0 },
+        });
+        if (correct) score += sujet.points;
+      }
+    }
+
+    // Calculer la note sur 20
+    const noteSur20 = totalPoints > 0
+      ? parseFloat((score / totalPoints * 20).toFixed(1))
+      : 0;
+
+    // Mettre à jour le participant
+    const updated = await prisma.participantExamen.update({
+      where: { id: participant.id },
+      data: {
+        score,
+        statut: 'termine',
+        deconnecteLe: new Date(),
+      },
+    });
+
+    return res.json({
+      score,
+      totalPoints,
+      noteSur20,
+      participant: updated,
+    });
+  } catch (err) {
+    console.error('[soumettreExamen]', err.message);
+    return res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
 module.exports = {
   creerSession,
   mesSessions,
@@ -412,4 +498,5 @@ module.exports = {
   terminerSession,
   getResultats,
   mesResultats,
+  soumettreExamen,
 };
