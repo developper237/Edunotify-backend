@@ -80,6 +80,9 @@ const rejoindreSession = async (req, res) => {
     if (existant && existant.statut === 'invalide') {
       return res.status(403).json({ error: 'Vous avez été invalidé de cette session' });
     }
+    if (existant && existant.statut === 'termine') {
+      return res.status(400).json({ error: 'Vous avez déjà passé cet examen', dejaTermine: true, participant: existant, session });
+    }
     if (existant) {
       return res.json({ participant: existant, session, dejaInscrit: true });
     }
