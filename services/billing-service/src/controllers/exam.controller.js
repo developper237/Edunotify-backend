@@ -340,6 +340,64 @@ const mesSessions = async (req, res) => {
   }
 };
 
+// ──────────────────────────────────────────────────────────────────
+// GET /exam/sessions/mes-resultats — Résultats étudiant
+// Retourne les sessions auxquelles l'étudiant a participé avec sa note
+// ──────────────────────────────────────────────────────────────────
+
+const mesResultats = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const participants = await prisma.participantExamen.findMany({
+      where: {
+        userId,
+        statut: { in: ['termine', 'invalide'] },
+      },
+      include: {
+        session: {
+          include: {
+            prof: { select: { id: true, nom: true, prenom: true } },
+            _count: { select: { sujets: true } },
+          },
+        },
+      },
+      orderBy: { deconnecteLe: 'desc' },
+    });
+
+    const resultats = participants.map((p) => {
+      const totalPoints = p.session.sujets.reduce((sum, s) => sum + s.points, 0);
+      const noteSur20 = totalPoints > 0 && p.score != null
+        ? parseFloat((p.score / totalPoints * 20).toFixed(1))
+        : null;
+
+      return {
+        sessionId: p.session.id,
+        titre: p.session.titre,
+        matiere: p.session.matiere,
+        statut: p.session.statut,
+        codeInvitation: p.session.codeInvitation,
+        debut: p.session.debut,
+        fin: p.session.fin,
+        dateCreation: p.session.createdAt,
+        profNom: p.session.prof ? `${p.session.prof.prenom} ${p.session.prof.nom}` : '',
+        nbSujets: p.session._count.sujets,
+        score: p.score,
+        totalPoints,
+        noteSur20,
+        statutParticipant: p.statut,
+        avertissements: p.avertissements,
+        termineLe: p.deconnecteLe,
+      };
+    });
+
+    return res.json({ resultats });
+  } catch (err) {
+    console.error('[mesResultats]', err.message);
+    return res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
 module.exports = {
   creerSession,
   mesSessions,
@@ -350,4 +408,5 @@ module.exports = {
   signalerAvertissement,
   terminerSession,
   getResultats,
+  mesResultats,
 };
