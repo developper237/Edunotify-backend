@@ -409,6 +409,86 @@ if (user.etablissement && !user.etablissement.actif) {
     }
   },
 
+  // ── GET /auth/filieres — Lister les filières de l'établissement ──
+  getFilieres: async (req, res) => {
+    try {
+      const etablissementId = req.user.etablissementId;
+      if (!etablissementId) {
+        return res.status(400).json({ error: 'Aucun établissement associé' });
+      }
+
+      const classes = await prisma.classe.findMany({
+        where: {
+          departement: { etablissementId }
+        },
+        select: { filiere: true },
+        distinct: ['filiere'],
+      });
+
+      const filieres = [...new Set(classes.map(c => c.filiere))];
+      return res.json({ filieres });
+    } catch (err) {
+      console.error('[GetFilieres]', err);
+      return res.status(500).json({ error: 'Erreur serveur' });
+    }
+  },
+
+  // ── POST /auth/filieres — Ajouter une filière (crée une classe par défaut) ──
+  addFiliere: async (req, res) => {
+    try {
+      const { nom, departementId } = req.body;
+      const etablissementId = req.user.etablissementId;
+
+      if (!nom || !departementId) {
+        return res.status(400).json({ error: 'nom et departementId requis' });
+      }
+
+      if (!etablissementId) {
+        return res.status(400).json({ error: 'Aucun établissement associé' });
+      }
+
+      // Vérifier que le département appartient à l'établissement
+      const dept = await prisma.departement.findFirst({
+        where: { id: departementId, etablissementId }
+      });
+      if (!dept) {
+        return res.status(404).json({ error: 'Département introuvable' });
+      }
+
+      // Vérifier que la filière n'existe pas déjà
+      const existing = await prisma.classe.findFirst({
+        where: {
+          filiere: nom,
+          departement: { etablissementId }
+        }
+      });
+      if (existing) {
+        return res.status(409).json({ error: 'Cette filière existe déjà' });
+      }
+
+      // Créer une classe par défaut pour cette filière
+      const classe = await prisma.classe.create({
+        data: {
+          nom: `${nom} L1`,
+          filiere: nom,
+          niveau: 'L1',
+          formation: 'FI',
+          codeGenere: `${nom.substring(0,3).toUpperCase()}-L1-FI`,
+          departementId,
+        }
+      });
+
+      return res.status(201).json({
+        message: 'Filière ajoutée avec succès',
+        filiere: nom,
+        classeId: classe.id,
+      });
+    } catch (err) {
+      console.error('[AddFiliere]', err);
+      return res.status(500).json({ error: 'Erreur serveur' });
+    }
+  },
+
   // ── GET /auth/etablissement/:codeId — Vérifier l'ID établissement ──
   getEtablissementByCodeId: async (req, res) => {
     try {

@@ -71,6 +71,10 @@ router.patch('/fcm-token', authenticate, async (req, res) => {
   }
 });
 
+// ── GESTION DES FILIÈRES ──────────────────────────────────────────
+router.get('/filieres', authenticate, AuthController.getFilieres);
+router.post('/filieres', authenticate, AuthController.addFiliere);
+
 // ── ADMIN ÉTABLISSEMENT ───────────────────────────────────────────
 router.get('/utilisateurs',      authenticate, AuthController.getUsers);
 router.patch('/utilisateurs/:id', authenticate, AuthController.updateUser);
