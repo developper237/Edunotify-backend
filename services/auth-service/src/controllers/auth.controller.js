@@ -409,6 +409,135 @@ if (user.etablissement && !user.etablissement.actif) {
     }
   },
 
+  // ── GET /auth/etablissement/:codeId — Vérifier l'ID établissement ──
+  getEtablissementByCodeId: async (req, res) => {
+    try {
+      const { codeId } = req.params;
+      if (!codeId) {
+        return res.status(400).json({ error: 'codeId requis' });
+      }
+
+      const etablissement = await prisma.etablissement.findFirst({
+        where: {
+          OR: [
+            { id: codeId },
+            { nom: { contains: codeId, mode: 'insensitive' } }
+          ]
+        },
+        select: {
+          id: true,
+          nom: true,
+          ville: true,
+          actif: true,
+        },
+      });
+
+      if (!etablissement) {
+        return res.status(404).json({ error: 'Établissement introuvable' });
+      }
+
+      if (!etablissement.actif) {
+        return res.status(403).json({ error: 'Cet établissement est suspendu' });
+      }
+
+      // Récupérer les filières (classes) de l'établissement
+      const classes = await prisma.classe.findMany({
+        where: {
+          departement: { etablissementId: etablissement.id }
+        },
+        select: { filiere: true },
+        distinct: ['filiere'],
+      });
+
+      const filieres = [...new Set(classes.map(c => c.filiere))];
+
+      return res.json({
+        etablissement: {
+          ...etablissement,
+          filieres,
+        }
+      });
+    } catch (err) {
+      console.error('[GetEtablissementByCodeId]', err);
+      return res.status(500).json({ error: 'Erreur serveur' });
+    }
+  },
+
+  // ── POST /auth/register-teacher — Inscription professeur ──────────
+  registerTeacher: async (req, res) => {
+    try {
+      const { nom, prenom, email, etablissementId, filieres, matieres } = req.body;
+
+      // Validation
+      if (!nom || !prenom || !email || !etablissementId) {
+        return res.status(400).json({ error: 'Tous les champs obligatoires doivent être remplis' });
+      }
+
+      // Vérifier que l'email n'est pas déjà utilisé
+      const existingUser = await prisma.user.findUnique({ where: { email } });
+      if (existingUser) {
+        return res.status(409).json({ error: 'Un compte avec cet email existe déjà' });
+      }
+
+      // Vérifier que l'établissement existe et est actif
+      const etablissement = await prisma.etablissement.findUnique({
+        where: { id: etablissementId }
+      });
+      if (!etablissement) {
+        return res.status(404).json({ error: 'Établissement introuvable' });
+      }
+      if (!etablissement.actif) {
+        return res.status(403).json({ error: 'Cet établissement est suspendu' });
+      }
+
+      // Générer un mot de passe temporaire
+      const tempPassword = Math.random().toString(36).slice(-8) + Math.floor(Math.random() * 100);
+      const passwordHash = await require('../utils/helpers').hashPassword(tempPassword);
+
+      // Créer l'utilisateur
+      const user = await prisma.user.create({
+        data: {
+          nom,
+          prenom,
+          email,
+          passwordHash,
+          role: 'professeur',
+          statut: 'premier_login',
+          etablissementId,
+          filieres: filieres || [],
+          matieresEnseignees: matieres || [],
+        },
+        include: {
+          etablissement: true,
+        }
+      });
+
+      // Envoyer les identifiants par email
+      await EmailService.sendProfesseurCredentials({
+        email: user.email,
+        prenom: user.prenom,
+        nom: user.nom,
+        password: tempPassword,
+        etablissementNom: etablissement.nom,
+        filieres: filieres ? filieres.join(', ') : '',
+        matieres: matieres ? matieres.join(', ') : '',
+      });
+
+      return res.status(201).json({
+        message: 'Compte professeur créé avec succès. Les identifiants ont été envoyés par email.',
+        user: {
+          id: user.id,
+          email: user.email,
+          nom: user.nom,
+          prenom: user.prenom,
+        }
+      });
+    } catch (err) {
+      console.error('[RegisterTeacher]', err);
+      return res.status(500).json({ error: 'Erreur serveur lors de l\'inscription' });
+    }
+  },
+
   // ── PUT /auth/superadmin/etablissement/:id ─────────────────────
   updateEtablissement: async (req, res) => {
     try {

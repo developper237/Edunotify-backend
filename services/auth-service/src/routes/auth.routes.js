@@ -15,6 +15,15 @@ router.post('/login', [
   body('password').notEmpty(),
 ], AuthController.login);
 
+// ── INSCRIPTION PROFESSEUR (publique, pas de authenticate) ──────
+router.get('/etablissement/:codeId', AuthController.getEtablissementByCodeId);
+router.post('/register-teacher', [
+  body('nom').notEmpty().trim(),
+  body('prenom').notEmpty().trim(),
+  body('email').isEmail().normalizeEmail(),
+  body('etablissementId').notEmpty().trim(),
+], AuthController.registerTeacher);
+
 // ── MOT DE PASSE OUBLIÉ (routes publiques, pas de authenticate) ──
 // POST /auth/mot-de-passe-oublie
 router.post('/mot-de-passe-oublie', [

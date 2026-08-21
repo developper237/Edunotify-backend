@@ -366,6 +366,60 @@ const templates = {
       </div>
     `),
 
+  // ── Compte Professeur ──────────────────────────────────────────
+  professeur: ({ prenom, nom, email, password, etablissementNom, filieres, matieres }) =>
+    baseTemplate(`
+      <span class="badge orange">Professeur</span>
+      <h2>Bienvenue sur SmartCampus, ${prenom} !</h2>
+      <p>Votre compte professeur a été créé pour l'établissement <strong>${etablissementNom}</strong>. Vous pouvez désormais gérer vos examens, consulter vos matières et communiquer avec vos étudiants.</p>
+
+      <div class="credentials">
+        <div class="row">
+          <div class="label">Nom complet</div>
+          <div class="value">${prenom} ${nom}</div>
+        </div>
+        <div class="row">
+          <div class="label">Email de connexion</div>
+          <div class="value highlight">${email}</div>
+        </div>
+        <div class="row">
+          <div class="label">Mot de passe temporaire</div>
+          <div class="value highlight">${password}</div>
+        </div>
+        <div class="row">
+          <div class="label">Établissement</div>
+          <div class="value">${etablissementNom}</div>
+        </div>
+        ${filieres ? `<div class="row">
+          <div class="label">Filières</div>
+          <div class="value">${filieres}</div>
+        </div>` : ''}
+        ${matieres ? `<div class="row">
+          <div class="label">Matières</div>
+          <div class="value">${matieres}</div>
+        </div>` : ''}
+      </div>
+
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-text">Connectez-vous avec les identifiants ci-dessus</div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-text">Changez votre mot de passe lors de la première connexion</div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-text">Créez vos sessions d'examen et partagez le code d'invitation</div>
+        </div>
+      </div>
+
+      <div class="warning">
+        <p>⚠️ Ce mot de passe est temporaire. Vous serez invité à le changer dès votre première connexion.</p>
+      </div>
+    `),
+
   // ── Changement de mot de passe ──────────────────────────────────
   passwordChanged: ({ prenom }) =>
     baseTemplate(`
@@ -494,6 +548,13 @@ const EmailService = {
       to:      data.email,
       subject: `[SmartCampus] Bienvenue — Vos identifiants de connexion`,
       html:    templates.etudiant(data),
+    }),
+
+  sendProfesseurCredentials: (data) =>
+    sendEmail({
+      to:      data.email,
+      subject: `[SmartCampus] Vos identifiants professeur — ${data.etablissementNom}`,
+      html:    templates.professeur(data),
     }),
 
   sendPasswordChanged: (data) =>

@@ -169,6 +169,8 @@ model User {
   departementId    String?
   classeEtudiantId String?
   classeDelegueId  String?
+  filieres         Json?         // ["Informatique", "Génie Logiciel"]
+  matieresEnseignees Json?       // ["Algorithmique", "Base de données"]
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
