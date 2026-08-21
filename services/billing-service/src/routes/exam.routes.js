@@ -8,6 +8,9 @@ const ctrl = require('../controllers/exam.controller');
 // ── Routes ──────────────────────────────────────────────────────
 router.use(auth);
 
+// Lister les sessions du prof
+router.get('/sessions/mes-sessions', ctrl.mesSessions);
+
 // Créer une session d'examen (prof)
 router.post('/sessions', ctrl.creerSession);
 

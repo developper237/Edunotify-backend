@@ -40,7 +40,7 @@ const creerSession = async (req, res) => {
           create: (sujets || []).map((s, i) => ({
             intitule: s.intitule || `Question ${i + 1}`,
             enonce: s.enonce || '',
-            typeSujet: s.type || 'qcm',
+            typeQuestion: s.type || 'qcm',
             options: s.options || null,
             points: s.points || 1,
             ordre: i,
@@ -268,7 +268,7 @@ const terminerSession = async (req, res) => {
       let score = 0;
       for (const sujet of session.sujets) {
         const reponse = participant.reponses.find(r => r.sujetId === sujet.id);
-        if (reponse && sujet.typeSujet === 'qcm') {
+        if (reponse && sujet.typeQuestion === 'qcm') {
           const correct = sujet.options && reponse.reponse === sujet.options.correct;
           await prisma.reponseExamen.update({
             where: { id: reponse.id },
@@ -319,8 +319,30 @@ const getResultats = async (req, res) => {
   }
 };
 
+// ──────────────────────────────────────────────────────────────────
+// GET /exam/sessions/mes-sessions — Sessions du prof
+// ──────────────────────────────────────────────────────────────────
+
+const mesSessions = async (req, res) => {
+  try {
+    const profId = req.user.id;
+    const sessions = await prisma.sessionExamen.findMany({
+      where: { profId },
+      include: {
+        _count: { select: { participants: true, sujets: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    return res.json({ sessions });
+  } catch (err) {
+    console.error('[mesSessions]', err.message);
+    return res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
 module.exports = {
   creerSession,
+  mesSessions,
   rejoindreSession,
   demarrerSession,
   getSession,
