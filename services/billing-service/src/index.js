@@ -14,6 +14,7 @@ const { connectDB }    = require('./utils/db');
 const billingRoutes    = require('./routes/billing.routes');
 const libraryRoutes    = require('./routes/library.routes');
 const examRoutes       = require('./routes/exam.routes');
+const chatRoutes       = require('./routes/chat.routes');
 const { semerPlans }   = require('./seed/plans');
 const { verifierExpirations } = require('./controllers/billing.controller');
 
@@ -30,6 +31,7 @@ app.use(express.json());
 app.use('/billing', billingRoutes);
 app.use('/library', libraryRoutes);
 app.use('/exam', examRoutes);
+app.use('/chat', chatRoutes);
 
 // Servir les fichiers uploadés (bibliothèque)
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));

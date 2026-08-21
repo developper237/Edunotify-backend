@@ -14,6 +14,7 @@ enum Role {
   super_admin
   admin
   chef_departement
+  professeur
   delegue
   etudiant
 }
