@@ -111,14 +111,14 @@ model Etablissement {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  departements  Departement[]
-  users         User[]
-  notifications Notification[]
-  abonnement    Subscription?
-  factures      Invoice[]
-  documents     Document[]
+  departements   Departement[]
+  users          User[]
+  notifications  Notification[]
+  abonnement     Subscription?
+  factures       Invoice[]
+  documents      Document[]
   sessionsExamen SessionExamen[]
-  groupesChat   GroupeChat[]
+  groupesChat    GroupeChat[]
 }
 
 model Departement {
@@ -155,24 +155,24 @@ model Classe {
 }
 
 model User {
-  id               String       @id @default(cuid())
-  nom              String
-  prenom           String
-  email            String       @unique
-  passwordHash     String
-  role             Role
-  statut           StatutCompte @default(premier_login)
-  matricule        String?      @unique
-  fcmToken         String?
-  biometrieActivee Boolean      @default(false)
-  etablissementId  String?
-  departementId    String?
-  classeEtudiantId String?
-  classeDelegueId  String?
-  filieres         Json?         // ["Informatique", "Génie Logiciel"]
-  matieresEnseignees Json?       // ["Algorithmique", "Base de données"]
-  createdAt        DateTime     @default(now())
-  updatedAt        DateTime     @updatedAt
+  id                 String       @id @default(cuid())
+  nom                String
+  prenom             String
+  email              String       @unique
+  passwordHash       String
+  role               Role
+  statut             StatutCompte @default(premier_login)
+  matricule          String?      @unique
+  fcmToken           String?
+  biometrieActivee   Boolean      @default(false)
+  etablissementId    String?
+  departementId      String?
+  classeEtudiantId   String?
+  classeDelegueId    String?
+  filieres           Json? // ["Informatique", "Génie Logiciel"]
+  matieresEnseignees Json? // ["Algorithmique", "Base de données"]
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
 
   etablissement   Etablissement? @relation(fields: [etablissementId], references: [id])
   departementChef Departement?   @relation("ChefDepartement", fields: [departementId], references: [id])
@@ -195,15 +195,14 @@ model User {
   requetes              RequeteNote[]              @relation("EtudiantRequetes")
   requetesTraitees      RequeteNote[]              @relation("RequetesTraitees")
   publications          PublicationNotes[]         @relation("PublicationAuteur")
-  chatMessages ChatMessage[]
-  documents Document[]
-  sessionsExamen SessionExamen[]
-  participantsExamen ParticipantExamen[]
-  groupesChatCrees GroupeChat[]
-  membresGroupes MembreGroupe[]
-  messagesGroupes MessageGroupe[]
+  chatMessages          ChatMessage[]
+  documents             Document[]
+  sessionsExamen        SessionExamen[]
+  participantsExamen    ParticipantExamen[]
+  groupesChatCrees      GroupeChat[]
+  membresGroupes        MembreGroupe[]
+  messagesGroupes       MessageGroupe[]
 }
-
 
 // ── Code de réinitialisation de mot de passe (OTP par email) ─────
 model PasswordResetCode {
@@ -301,7 +300,7 @@ model Notification {
 }
 
 model QuestionSondage {
-  id             String @id @default(cuid())
+  id             String  @id @default(cuid())
   notificationId String
   texte          String
   ordre          Int     @default(0)
@@ -380,10 +379,10 @@ model PublicationNotes {
   publieLe  DateTime @default(now())
   createdAt DateTime @default(now())
 
-  classe Classe @relation(fields: [classeId], references: [id], onDelete: Cascade)
-  auteur User   @relation("PublicationAuteur", fields: [publiePar], references: [id])
-  notes  Note[]
-   requetes RequeteNote[] 
+  classe   Classe        @relation(fields: [classeId], references: [id], onDelete: Cascade)
+  auteur   User          @relation("PublicationAuteur", fields: [publiePar], references: [id])
+  notes    Note[]
+  requetes RequeteNote[]
 }
 
 model Note {
@@ -414,20 +413,21 @@ model RequeteNote {
   motif         String
   statut        StatutRequete @default(en_attente)
   reponse       String?
-  noteId        String?       // ← optionnel (null si note absente)
-  publicationId String?       // ← nouveau : pour les notes absentes
+  noteId        String? // ← optionnel (null si note absente)
+  publicationId String? // ← nouveau : pour les notes absentes
   matiereId     String
   etudiantId    String
   traiteeParId  String?
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
-  note        Note?            @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  note        Note?             @relation(fields: [noteId], references: [id], onDelete: Cascade)
   publication PublicationNotes? @relation(fields: [publicationId], references: [id], onDelete: Cascade)
-  matiere     Matiere          @relation(fields: [matiereId], references: [id])
-  etudiant    User             @relation("EtudiantRequetes", fields: [etudiantId], references: [id])
-  traiteepar  User?            @relation("RequetesTraitees", fields: [traiteeParId], references: [id])
+  matiere     Matiere           @relation(fields: [matiereId], references: [id])
+  etudiant    User              @relation("EtudiantRequetes", fields: [etudiantId], references: [id])
+  traiteepar  User?             @relation("RequetesTraitees", fields: [traiteeParId], references: [id])
 }
+
 model ChatMessage {
   id        String   @id @default(cuid())
   text      String
@@ -463,19 +463,19 @@ model BillingPlan {
 
 // Abonnement actuel d'un établissement (un seul par établissement).
 model Subscription {
-  id                 String            @id @default(cuid())
-  etablissementId    String            @unique
+  id                 String           @id @default(cuid())
+  etablissementId    String           @unique
   planCode           Plan
-  statut             StatutAbonnement  @default(essai)
-  cycle              CycleFacturation  @default(mensuel)
+  statut             StatutAbonnement @default(essai)
+  cycle              CycleFacturation @default(mensuel)
   essaiJusqua        DateTime? // fin de l'essai gratuit (14 jours)
   debutPeriode       DateTime? // début de la période payée
   finPeriode         DateTime? // fin de la période payée
   prixXAF            Int? // montant facturé par période
-  renouvellementAuto Boolean           @default(true)
+  renouvellementAuto Boolean          @default(true)
   annuleLe           DateTime?
-  createdAt          DateTime          @default(now())
-  updatedAt          DateTime          @updatedAt
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
 
   etablissement Etablissement @relation(fields: [etablissementId], references: [id], onDelete: Cascade)
   plan          BillingPlan   @relation(fields: [planCode], references: [code])
@@ -515,6 +515,7 @@ model Invoice {
   etablissementId   String
   montantXAF        Int
   cycle             CycleFacturation
+  planCode          Plan             @default(free) // plan demandé pour cette facture
   statut            StatutFacture    @default(en_attente)
   methodePaiement   MethodePaiement?
   referencePaiement String? // transaction_id CinetPay
@@ -522,7 +523,7 @@ model Invoice {
   payeeLe           DateTime?
   createdAt         DateTime         @default(now())
 
-  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  subscription  Subscription  @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
   etablissement Etablissement @relation(fields: [etablissementId], references: [id], onDelete: Cascade)
 
   @@index([etablissementId, createdAt])
@@ -543,18 +544,18 @@ enum CategorieDocument {
 }
 
 model Document {
-  id               String             @id @default(cuid())
-  nom              String
-  description      String?
-  categorie        CategorieDocument  @default(autre)
-  typeFichier      String             // pdf, doc, pptx, etc.
-  tailleOctets     Int
-  urlFichier       String             // chemin de stockage
-  thumbnailUrl     String?
-  etablissementId  String
-  uploadeParId     String
+  id                String            @id @default(cuid())
+  nom               String
+  description       String?
+  categorie         CategorieDocument @default(autre)
+  typeFichier       String // pdf, doc, pptx, etc.
+  tailleOctets      Int
+  urlFichier        String // chemin de stockage
+  thumbnailUrl      String?
+  etablissementId   String
+  uploadeParId      String
   nbTelechargements Int               @default(0)
-  createdAt        DateTime           @default(now())
+  createdAt         DateTime          @default(now())
 
   etablissement Etablissement @relation(fields: [etablissementId], references: [id], onDelete: Cascade)
   uploadePar    User          @relation(fields: [uploadeParId], references: [id], onDelete: Cascade)
@@ -582,21 +583,21 @@ enum StatutParticipantExamen {
 }
 
 model SessionExamen {
-  id             String           @id @default(cuid())
-  codeInvitation String           @unique
-  titre          String
-  matiere        String
-  description    String?
-  dureeMinutes   Int              // durée en minutes
-  debut          DateTime?
-  fin            DateTime?
-  statut         StatutExamen     @default(en_preparation)
-  profId         String
+  id              String       @id @default(cuid())
+  codeInvitation  String       @unique
+  titre           String
+  matiere         String
+  description     String?
+  dureeMinutes    Int // durée en minutes
+  debut           DateTime?
+  fin             DateTime?
+  statut          StatutExamen @default(en_preparation)
+  profId          String
   etablissementId String
-  createdAt      DateTime         @default(now())
+  createdAt       DateTime     @default(now())
 
-  prof         User          @relation(fields: [profId], references: [id])
-  etablissement Etablissement @relation(fields: [etablissementId], references: [id], onDelete: Cascade)
+  prof          User                @relation(fields: [profId], references: [id])
+  etablissement Etablissement       @relation(fields: [etablissementId], references: [id], onDelete: Cascade)
   participants  ParticipantExamen[]
   sujets        SujetExamen[]
 
@@ -605,17 +606,17 @@ model SessionExamen {
 }
 
 model ParticipantExamen {
-  id              String                   @id @default(cuid())
-  sessionId       String
-  userId          String
-  avertissements  Int                      @default(0)   // max 5 (caméra) + 3 (quit)
-  score           Float?
-  statut          StatutParticipantExamen  @default(connecte)
-  connecteLe      DateTime                 @default(now())
-  deconnecteLe    DateTime?
+  id             String                  @id @default(cuid())
+  sessionId      String
+  userId         String
+  avertissements Int                     @default(0) // max 5 (caméra) + 3 (quit)
+  score          Float?
+  statut         StatutParticipantExamen @default(connecte)
+  connecteLe     DateTime                @default(now())
+  deconnecteLe   DateTime?
 
-  session SessionExamen @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  session  SessionExamen   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   reponses ReponseExamen[]
 
   @@unique([sessionId, userId])
@@ -623,17 +624,17 @@ model ParticipantExamen {
 }
 
 model SujetExamen {
-  id          String   @id @default(cuid())
-  sessionId   String
-  intitule    String
-  enonce      String
-  typeQuestion String  @default("qcm")
-  options     Json?
-  points      Int      @default(1)
-  ordre       Int      @default(0)
+  id           String @id @default(cuid())
+  sessionId    String
+  intitule     String
+  enonce       String
+  typeQuestion String @default("qcm")
+  options      Json?
+  points       Int    @default(1)
+  ordre        Int    @default(0)
 
-  session   SessionExamen    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  reponses  ReponseExamen[]
+  session  SessionExamen   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  reponses ReponseExamen[]
 
   @@index([sessionId, ordre])
 }
@@ -642,7 +643,7 @@ model ReponseExamen {
   id            String   @id @default(cuid())
   participantId String
   sujetId       String
-  reponse       String   // réponse de l'étudiant
+  reponse       String // réponse de l'étudiant
   estCorrecte   Boolean?
   pointsObtenus Int?
   reponduLe     DateTime @default(now())
@@ -665,8 +666,8 @@ model GroupeChat {
   creeParId       String
   createdAt       DateTime @default(now())
 
-  etablissement Etablissement @relation(fields: [etablissementId], references: [id], onDelete: Cascade)
-  creePar       User          @relation(fields: [creeParId], references: [id])
+  etablissement Etablissement   @relation(fields: [etablissementId], references: [id], onDelete: Cascade)
+  creePar       User            @relation(fields: [creeParId], references: [id])
   membres       MembreGroupe[]
   messages      MessageGroupe[]
 
@@ -674,10 +675,10 @@ model GroupeChat {
 }
 
 model MembreGroupe {
-  id        String   @id @default(cuid())
-  groupId   String
-  userId    String
-  joinedAt  DateTime @default(now())
+  id       String   @id @default(cuid())
+  groupId  String
+  userId   String
+  joinedAt DateTime @default(now())
 
   groupe GroupeChat @relation(fields: [groupId], references: [id], onDelete: Cascade)
   user   User       @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -690,7 +691,7 @@ model MessageGroupe {
   groupId   String
   userId    String
   texte     String
-  luPar     Json?    // tableau d'ids d'utilisateurs qui ont lu
+  luPar     Json? // tableau d'ids d'utilisateurs qui ont lu
   createdAt DateTime @default(now())
 
   groupe GroupeChat @relation(fields: [groupId], references: [id], onDelete: Cascade)

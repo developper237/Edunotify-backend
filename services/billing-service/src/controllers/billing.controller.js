@@ -16,36 +16,104 @@ const genererNumeroFacture = () =>
 const nbEtudiantsEtab = (etablissementId) =>
   prisma.user.count({ where: { etablissementId, role: 'etudiant' } });
 
-// Active (ou réactive) l'abonnement après un paiement confirmé.
-const activerAbonnement = async (subscriptionId, montantXAF, cycle) => {
+// Active l'abonnement uniquement après confirmation du paiement.
+const activerAbonnement = async (subscriptionId, planCode, montantXAF, cycle) => {
   const sub = await prisma.subscription.findUnique({
     where: { id: subscriptionId },
   });
   if (!sub) return null;
 
-  const now       = new Date();
-  const jours     = cycle === 'annuel' ? 365 : 30;
+  const now = new Date();
+  const jours = cycle === 'annuel' ? 365 : 30;
   const finPeriode = new Date(now.getTime() + jours * 24 * 3600 * 1000);
 
   const updated = await prisma.subscription.update({
     where: { id: sub.id },
     data: {
-      statut:            'actif',
-      essaiJusqua:       null,
-      debutPeriode:      now,
+      planCode,
+      statut: 'actif',
+      essaiJusqua: null,
+      debutPeriode: now,
       finPeriode,
-      prixXAF:           montantXAF,
+      prixXAF: montantXAF,
       renouvellementAuto: true,
-      annuleLe:          null,
+      annuleLe: null,
     },
   });
 
   await prisma.etablissement.update({
     where: { id: sub.etablissementId },
-    data:  { plan: sub.planCode },
+    data: { plan: planCode },
   });
 
   return updated;
+};
+
+// Synchronise une facture et son abonnement après un retour Fapshi.
+// Cette fonction est idempotente: un même statut peut être reçu plusieurs fois.
+const synchroniserFacturePaiement = async (facture, statut) => {
+  if (statut === 'ACCEPTED' || statut === 'SUCCESSFUL') {
+    if (facture.statut !== 'payee') {
+      await prisma.invoice.update({
+        where: { id: facture.id },
+        data: { statut: 'payee', payeeLe: new Date() },
+      });
+    }
+    const sub = await prisma.subscription.findUnique({
+      where: { id: facture.subscriptionId },
+    });
+    // Les anciennes factures n'ont pas de planCode: leur abonnement garde
+    // le plan demandé par l'ancien flux. Les nouvelles factures le portent.
+    const planCode = facture.planCode === 'free' ? sub?.planCode : facture.planCode;
+    if (sub && planCode && (sub.statut !== 'actif' || sub.planCode !== planCode)) {
+      await activerAbonnement(
+        facture.subscriptionId,
+        planCode,
+        facture.montantXAF,
+        facture.cycle,
+      );
+    }
+    return 'payee';
+  }
+
+  if (statut === 'REFUSED' || statut === 'FAILED' || statut === 'EXPIRED') {
+    if (facture.statut !== 'echouee') {
+      await prisma.invoice.update({
+        where: { id: facture.id },
+        data: { statut: 'echouee' },
+      });
+    }
+
+    // Nettoyage des abonnements d'essai créés par l'ancien flux, qui
+    // activait le plan avant la confirmation du paiement.
+    const sub = await prisma.subscription.findUnique({
+      where: { id: facture.subscriptionId },
+    });
+    if (sub && sub.statut === 'essai') {
+      await prisma.subscription.update({
+        where: { id: sub.id },
+        data: {
+          planCode: 'free',
+          statut: 'impaye',
+          essaiJusqua: null,
+          debutPeriode: null,
+          finPeriode: null,
+          prixXAF: null,
+          renouvellementAuto: false,
+        },
+      });
+      await prisma.etablissement.update({
+        where: { id: sub.etablissementId },
+        data: { plan: 'free' },
+      });
+    }
+
+    // Une première souscription reste sur free/impaye; aucun accès payant
+    // n'est accordé à la suite d'un paiement refusé.
+    return 'echouee';
+  }
+
+  return 'en_attente';
 };
 
 // ──────────────────────────────────────────────────────────────────
@@ -122,38 +190,60 @@ const creerAbonnement = async (req, res) => {
     }
 
     // ── Plan payant ──
+    // Ne pas modifier le plan effectif avant la confirmation Fapshi.
+    // Une première souscription utilise un abonnement technique free/impaye
+    // afin de pouvoir rattacher la facture et lancer le Direct Pay.
     const nouveauDebut =
       !sub || sub.planCode === 'free' || (sub.statut !== 'actif' && sub.statut !== 'essai');
 
-    let essaiJusqua = null;
-    if (nouveauDebut) {
-      // Essai gratuit de 14 jours
-      essaiJusqua = new Date(Date.now() + ESSAI_GRATUIT_JOURS * 24 * 3600 * 1000);
-      const data = {
-        planCode, cycle, statut: 'essai', essaiJusqua,
-        debutPeriode: null, finPeriode: null, prixXAF,
-        renouvellementAuto: true, annuleLe: null,
-      };
-      sub = sub
-        ? await prisma.subscription.update({ where: { id: sub.id }, data })
-        : await prisma.subscription.create({ data: { etablissementId: etabId, ...data } });
-    } else {
-      // Changement de plan en cours de période
+    if (!sub) {
+      sub = await prisma.subscription.create({
+        data: {
+          etablissementId: etabId,
+          planCode: 'free',
+          cycle,
+          statut: 'impaye',
+          essaiJusqua: null,
+          debutPeriode: null,
+          finPeriode: null,
+          prixXAF: null,
+          renouvellementAuto: false,
+          annuleLe: null,
+        },
+      });
+    } else if (sub.planCode === 'free' || sub.statut === 'impaye' || sub.statut === 'essai') {
+      const ancienEssaiPayant = sub.statut === 'essai' && sub.planCode !== 'free';
       sub = await prisma.subscription.update({
         where: { id: sub.id },
-        data:  { planCode, cycle, prixXAF },
+        data: {
+          planCode: 'free',
+          cycle,
+          statut: 'impaye',
+          essaiJusqua: null,
+          debutPeriode: null,
+          finPeriode: null,
+          prixXAF: null,
+          renouvellementAuto: false,
+          annuleLe: null,
+        },
       });
+      if (ancienEssaiPayant) {
+        await prisma.etablissement.update({
+          where: { id: etabId },
+          data: { plan: 'free' },
+        });
+      }
     }
 
-    // L'essai donne accès au plan immédiatement
-    await prisma.etablissement.update({ where: { id: etabId }, data: { plan: planCode } });
-
-    // Facture pour la période
-    const numero  = genererNumeroFacture();
+    const numero = genererNumeroFacture();
     const facture = await prisma.invoice.create({
       data: {
-        numero, subscriptionId: sub.id, etablissementId: etabId,
-        montantXAF: prixXAF, cycle,
+        numero,
+        subscriptionId: sub.id,
+        etablissementId: etabId,
+        montantXAF: prixXAF,
+        cycle,
+        planCode,
       },
     });
 
@@ -194,13 +284,13 @@ const creerAbonnement = async (req, res) => {
 
     return res.status(201).json({
       message: nouveauDebut
-        ? `Abonnement ${plan.nom} activé avec ${ESSAI_GRATUIT_JOURS} jours d'essai gratuit`
-        : `Abonnement mis à jour vers ${plan.nom}`,
+        ? `Paiement du plan ${plan.nom} en attente de confirmation`
+        : `Paiement du plan ${plan.nom} en attente de confirmation`,
       abonnement: sub,
       facture,
       paiementUrl,
-      essaiGratuit: nouveauDebut,
-      essaiJusqua,
+      essaiGratuit: false,
+      essaiJusqua: null,
     });
   } catch (err) {
     console.error('[creerAbonnement]', err);
@@ -346,6 +436,15 @@ const verifierStatutPaiement = async (req, res) => {
     try {
       const v = await fapshi.verifierPaiement(transId);
       statut = v.status; // ACCEPTED | REFUSED | PENDING
+
+      const facture = await prisma.invoice.findFirst({
+        where: { referencePaiement: transId },
+      });
+      if (facture) {
+        const factureStatut = await synchroniserFacturePaiement(facture, statut);
+        if (factureStatut === 'payee') statut = 'ACCEPTED';
+        if (factureStatut === 'echouee') statut = 'REFUSED';
+      }
     } catch (err) {
       console.warn('[verifierStatutPaiement] Fapshi:', err.message);
     }
@@ -466,20 +565,13 @@ const webhookFapshi = async (req, res) => {
     }
 
     if (statut === 'ACCEPTED' || statut === 'SUCCESSFUL') {
-      await prisma.invoice.update({
-        where: { id: facture.id },
-        data:  { statut: 'payee', payeeLe: new Date() },
-      });
-      await activerAbonnement(facture.subscriptionId, facture.montantXAF, facture.cycle);
-      return res.json({ message: 'Paiement confirmé', statut: 'payee' });
+      const resultat = await synchroniserFacturePaiement(facture, statut);
+      return res.json({ message: 'Paiement confirmé', statut: resultat });
     }
 
     if (statut === 'REFUSED' || statut === 'FAILED' || statut === 'EXPIRED') {
-      await prisma.invoice.update({
-        where: { id: facture.id },
-        data:  { statut: 'echouee' },
-      });
-      return res.json({ message: 'Paiement refusé', statut: 'echouee' });
+      const resultat = await synchroniserFacturePaiement(facture, statut);
+      return res.json({ message: 'Paiement refusé', statut: resultat });
     }
 
     return res.json({ message: 'Paiement en attente', statut: 'en_attente' });
@@ -514,26 +606,19 @@ const webhookCinetpay = async (req, res) => {
     // Vérification serveur (ne jamais se fier à l'IPN seul)
     let statut = body.cpm_trans_status || body.status;
     try {
-      statut = (await verifierPaiement(transId)).status;
+      statut = (await cinetpay.verifierPaiement(transId)).status;
     } catch (err) {
       console.warn('[Webhook] Vérification CinetPay impossible, repli sur l\'IPN:', err.message);
     }
 
     if (statut === 'ACCEPTED' || statut === 'SUCCESS') {
-      await prisma.invoice.update({
-        where: { id: facture.id },
-        data:  { statut: 'payee', payeeLe: new Date() },
-      });
-      await activerAbonnement(facture.subscriptionId, facture.montantXAF, facture.cycle);
-      return res.json({ message: 'Paiement confirmé', statut: 'payee' });
+      const resultat = await synchroniserFacturePaiement(facture, statut);
+      return res.json({ message: 'Paiement confirmé', statut: resultat });
     }
 
     if (statut === 'REFUSED' || statut === 'CANCELED' || statut === 'FAILED' || statut === 'EXPIRED') {
-      await prisma.invoice.update({
-        where: { id: facture.id },
-        data:  { statut: 'echouee' },
-      });
-      return res.json({ message: 'Paiement refusé', statut: 'echouee' });
+      const resultat = await synchroniserFacturePaiement(facture, statut);
+      return res.json({ message: 'Paiement refusé', statut: resultat });
     }
 
     // PENDING : on répond 200 pour éviter les renvois intempestifs
