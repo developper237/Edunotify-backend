@@ -303,11 +303,13 @@ const initierPaiementDirectCtrl = async (req, res) => {
       });
       transId = p.token;
       providerUtilise = 'fapshi';
+      console.log('[Billing] Fapshi Direct Pay OK:', transId);
     } catch (errFapshi) {
-      console.warn('[Billing] Fapshi Direct Pay échoué:', errFapshi.message);
+      console.error('[Billing] Fapshi Direct Pay échoué:', errFapshi.message, errFapshi.body || '');
       return res.status(502).json({
         error: `Paiement direct impossible: ${errFapshi.message}`,
-        hint: 'Vérifiez votre numéro et réessayez',
+        details: errFapshi.body || null,
+        hint: 'Vérifiez votre numéro de téléphone (format: 6XXXXXXXX) et réessayez',
       });
     }
 

@@ -139,23 +139,29 @@ const initierPaiementDirect = async ({ numero, montantXAF, description, email, t
 
   try {
     // POST /direct-pay
-    const result = await _request('POST', '/direct-pay', {
+    // NOTE: on n'envoie PAS 'medium' — Fapshi détecte automatiquement
+    // l'opérateur (MTN/Orange) à partir du numéro de téléphone.
+    // Envoyer un medium erroné provoque un échec immédiat de la transaction.
+    const payload = {
       amount: Math.max(100, Math.round(montantXAF)),
       phone: telephone,
-      medium: mediumDe(methode),
       name: 'EduNotify',
       email: email || undefined,
       externalId: numero,
       userId: numero,
       message: description || 'Abonnement EduNotify',
-    });
+    };
+
+    console.log('[Fapshi] Direct Pay request:', JSON.stringify({ phone: telephone, amount: payload.amount }));
+    const result = await _request('POST', '/direct-pay', payload);
+    console.log('[Fapshi] Direct Pay response:', JSON.stringify(result));
 
     return {
       url:   null, // pas d'URL pour directPay — le paiement se fait sur le téléphone
       token: result.transId,
     };
   } catch (err) {
-    console.error('[Fapshi] initierPaiementDirect error:', err.message);
+    console.error('[Fapshi] initierPaiementDirect error:', err.message, err.body || '');
     throw err;
   }
 };
@@ -169,6 +175,7 @@ const verifierPaiement = async (transId) => {
   try {
     // GET /payment-status/{transId}
     const tx = await _request('GET', `/payment-status/${transId}`);
+    console.log('[Fapshi] verifierPaiement:', transId, '→', tx.status);
 
     // Statuts Fapshi : CREATED, SUCCESSFUL, FAILED, EXPIRED
     const statut = tx.status === 'SUCCESSFUL' ? 'ACCEPTED'
