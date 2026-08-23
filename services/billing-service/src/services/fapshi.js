@@ -132,16 +132,13 @@ const initierPaiement = async ({ numero, montantXAF, description, email, methode
  * @param {string}  p.telephone   OBLIGATOIRE pour directPay
  * @param {'mtn_momo'|'orange_money'} [p.methode]
  */
-const initierPaiementDirect = async ({ numero, montantXAF, description, email, telephone, methode }) => {
+const initierPaiementDirect = async ({ numero, montantXAF, description, email, telephone, methode = 'mtn_momo' }) => {
   if (!telephone) {
     throw new Error('Le numéro de téléphone est obligatoire pour le paiement direct');
   }
 
   try {
     // POST /direct-pay
-    // NOTE: on n'envoie PAS 'medium' — Fapshi détecte automatiquement
-    // l'opérateur (MTN/Orange) à partir du numéro de téléphone.
-    // Envoyer un medium erroné provoque un échec immédiat de la transaction.
     const payload = {
       amount: Math.max(100, Math.round(montantXAF)),
       phone: telephone,
@@ -152,7 +149,14 @@ const initierPaiementDirect = async ({ numero, montantXAF, description, email, t
       message: description || 'Abonnement EduNotify',
     };
 
-    console.log('[Fapshi] Direct Pay request:', JSON.stringify({ phone: telephone, amount: payload.amount }));
+    // Envoyer le medium pour aider Fapshi à router vers le bon provider
+    if (methode === 'orange_money') {
+      payload.medium = 'orange money';
+    } else {
+      payload.medium = 'mobile money';
+    }
+
+    console.log('[Fapshi] Direct Pay request:', JSON.stringify({ phone: telephone, amount: payload.amount, medium: payload.medium }));
     const result = await _request('POST', '/direct-pay', payload);
     console.log('[Fapshi] Direct Pay response:', JSON.stringify(result));
 
