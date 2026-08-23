@@ -126,6 +126,7 @@ model User {
   departementId     String?
   classeEtudiantId  String?
   classeDelegueId   String?
+  photoUrl          String?
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
 

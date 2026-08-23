@@ -89,6 +89,14 @@ router.patch(
   AuthController.uploadLogoEtablissement,
 );
 
+// Photo de profil (tout utilisateur authentifié)
+router.patch(
+  '/photo-profil',
+  authenticate,
+  uploadLogo.single('photo'),
+  AuthController.uploadPhotoProfil,
+);
+
 // ── SUPER ADMIN ───────────────────────────────────────────────────
 router.get('/superadmin/etablissements',         authenticate, AuthController.getEtablissements);
 router.put('/superadmin/etablissement/:id',      authenticate, AuthController.updateEtablissement);

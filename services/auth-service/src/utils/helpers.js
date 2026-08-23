@@ -63,6 +63,7 @@ const serializeUser = (user) => ({
   classeId:         user.classeEtudiantId || user.classeDelegueId,
   fcmToken:         user.fcmToken,
   biometrieActivee: user.biometrieActivee,
+  photoUrl:         user.photoUrl,
   // Infos contextuelles
   etablissementNom:  user.etablissement?.nom,
   etablissementLogo: user.etablissement?.logoUrl,

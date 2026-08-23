@@ -171,6 +171,7 @@ model User {
   classeDelegueId    String?
   filieres           Json? // ["Informatique", "Génie Logiciel"]
   matieresEnseignees Json? // ["Algorithmique", "Base de données"]
+  photoUrl           String?
   createdAt          DateTime     @default(now())
   updatedAt          DateTime     @updatedAt
 
@@ -661,6 +662,7 @@ model ReponseExamen {
 model GroupeChat {
   id              String   @id @default(cuid())
   nom             String
+  codeInvitation  String   @unique
   etablissementId String
   classeId        String?
   creeParId       String

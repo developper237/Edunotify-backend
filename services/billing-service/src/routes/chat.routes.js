@@ -7,6 +7,16 @@ const { prisma } = require('../utils/db');
 // ── Tous les utilisateurs authentifiés peuvent accéder au chat ──
 router.use(auth);
 
+// Génère un code d'invitation unique (8 caractères, ex: SC-ABC123)
+const genererCodeInvitation = () => {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // sans O/0/I/1 ambigus
+  let code = '';
+  for (let i = 0; i < 6; i++) {
+    code += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  return `SC-${code}`;
+};
+
 // ── GET /chat/groups — Lister les groupes de l'établissement ────
 router.get('/groups', async (req, res) => {
   try {
@@ -27,6 +37,7 @@ router.get('/groups', async (req, res) => {
     const result = groupes.map((g) => ({
       id: g.id,
       nom: g.nom,
+      codeInvitation: g.codeInvitation,
       nbMembres: g._count.membres,
       dernierMessage: g.messages[0]?.texte ?? null,
       dernierMessageLe: g.messages[0]?.createdAt ?? null,
@@ -52,9 +63,16 @@ router.post('/groups', async (req, res) => {
       return res.status(400).json({ error: 'nom, etablissementId et userId requis' });
     }
 
+    // Générer un code d'invitation unique
+    let codeInvitation = genererCodeInvitation();
+    while (await prisma.groupeChat.findUnique({ where: { codeInvitation } })) {
+      codeInvitation = genererCodeInvitation();
+    }
+
     const groupe = await prisma.groupeChat.create({
       data: {
         nom,
+        codeInvitation,
         etablissementId,
         creeParId: userId,
         membres: {
@@ -69,6 +87,7 @@ router.post('/groups', async (req, res) => {
     res.status(201).json({
       id: groupe.id,
       nom: groupe.nom,
+      codeInvitation: groupe.codeInvitation,
       nbMembres: groupe._count.membres,
       creeParId: groupe.creeParId,
       createdAt: groupe.createdAt,
@@ -79,20 +98,63 @@ router.post('/groups', async (req, res) => {
   }
 });
 
-// ── POST /chat/groups/:id/join — Rejoindre un groupe ────────────
+// ── POST /chat/groups/join — Rejoindre un groupe par code d'invitation ──
+router.post('/groups/join', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'];
+    const etablissementId = req.headers['x-etab-id'];
+    const { codeInvitation } = req.body;
+
+    if (!userId || !etablissementId) {
+      return res.status(400).json({ error: 'userId et etablissementId requis' });
+    }
+    if (!codeInvitation) {
+      return res.status(400).json({ error: 'codeInvitation requis' });
+    }
+
+    const code = String(codeInvitation).trim().toUpperCase();
+
+    // Vérifier que le groupe existe et appartient au MÊME établissement
+    const groupe = await prisma.groupeChat.findUnique({ where: { codeInvitation: code } });
+    if (!groupe) {
+      return res.status(404).json({ error: 'Groupe introuvable. Vérifiez le code d\'invitation.' });
+    }
+    if (groupe.etablissementId !== etablissementId) {
+      return res.status(403).json({ error: 'Ce groupe appartient à un autre établissement' });
+    }
+
+    // Ajouter le membre (ignorer si déjà membre)
+    await prisma.membreGroupe.upsert({
+      where: { groupId_userId: { groupId: groupe.id, userId } },
+      create: { groupId: groupe.id, userId },
+      update: {},
+    });
+
+    res.json({ success: true, groupeId: groupe.id, nom: groupe.nom });
+  } catch (err) {
+    console.error('[Chat] Erreur POST /groups/join:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ── POST /chat/groups/:id/join — Rejoindre un groupe (par id, même établissement) ──
 router.post('/groups/:id/join', async (req, res) => {
   try {
     const userId = req.headers['x-user-id'];
+    const etablissementId = req.headers['x-etab-id'];
     const { id } = req.params;
 
     if (!userId) {
       return res.status(400).json({ error: 'userId requis' });
     }
 
-    // Vérifier que le groupe existe
+    // Vérifier que le groupe existe ET appartient au même établissement
     const groupe = await prisma.groupeChat.findUnique({ where: { id } });
     if (!groupe) {
       return res.status(404).json({ error: 'Groupe introuvable' });
+    }
+    if (etablissementId && groupe.etablissementId !== etablissementId) {
+      return res.status(403).json({ error: 'Groupe d\'un autre établissement' });
     }
 
     // Ajouter le membre (ignorer si déjà membre)
@@ -113,8 +175,32 @@ router.post('/groups/:id/join', async (req, res) => {
 router.get('/groups/:id/messages', async (req, res) => {
   try {
     const { id } = req.params;
+    const etablissementId = req.headers['x-etab-id'];
+    const userId = req.headers['x-user-id'];
     const limit = Math.min(parseInt(req.query.limit) || 50, 100);
     const before = req.query.before; // cursor-based pagination
+
+    // Isolation : vérifier que le groupe appartient à l'établissement de l'utilisateur
+    const groupe = await prisma.groupeChat.findUnique({
+      where: { id },
+      select: { etablissementId: true },
+    });
+    if (!groupe) {
+      return res.status(404).json({ error: 'Groupe introuvable' });
+    }
+    if (etablissementId && groupe.etablissementId !== etablissementId) {
+      return res.status(403).json({ error: 'Groupe d\'un autre établissement' });
+    }
+
+    // Vérifier que l'utilisateur est membre
+    if (userId) {
+      const membre = await prisma.membreGroupe.findUnique({
+        where: { groupId_userId: { groupId: id, userId } },
+      });
+      if (!membre) {
+        return res.status(403).json({ error: 'Vous n\'êtes pas membre de ce groupe' });
+      }
+    }
 
     const where = { groupId: id };
     if (before) {
@@ -124,7 +210,7 @@ router.get('/groups/:id/messages', async (req, res) => {
     const messages = await prisma.messageGroupe.findMany({
       where,
       include: {
-        user: { select: { id: true, nom: true, prenom: true } },
+        user: { select: { id: true, nom: true, prenom: true, photoUrl: true } },
       },
       orderBy: { createdAt: 'asc' },
       take: limit,
@@ -141,6 +227,7 @@ router.get('/groups/:id/messages', async (req, res) => {
 router.post('/groups/:id/messages', async (req, res) => {
   try {
     const userId = req.headers['x-user-id'];
+    const etablissementId = req.headers['x-etab-id'];
     const { id } = req.params;
     const { texte } = req.body;
 
@@ -148,7 +235,19 @@ router.post('/groups/:id/messages', async (req, res) => {
       return res.status(400).json({ error: 'texte et userId requis' });
     }
 
-    // Vérifier que le groupe existe et que l'utilisateur est membre
+    // Isolation : vérifier que le groupe appartient à l'établissement de l'utilisateur
+    const groupe = await prisma.groupeChat.findUnique({
+      where: { id },
+      select: { etablissementId: true },
+    });
+    if (!groupe) {
+      return res.status(404).json({ error: 'Groupe introuvable' });
+    }
+    if (etablissementId && groupe.etablissementId !== etablissementId) {
+      return res.status(403).json({ error: 'Groupe d\'un autre établissement' });
+    }
+
+    // Vérifier que l'utilisateur est membre
     const membre = await prisma.membreGroupe.findUnique({
       where: { groupId_userId: { groupId: id, userId } },
     });
@@ -164,7 +263,7 @@ router.post('/groups/:id/messages', async (req, res) => {
         texte,
       },
       include: {
-        user: { select: { id: true, nom: true, prenom: true } },
+        user: { select: { id: true, nom: true, prenom: true, photoUrl: true } },
       },
     });
 

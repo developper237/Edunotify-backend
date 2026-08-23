@@ -4,14 +4,25 @@ const path   = require('path');
 const fs     = require('fs');
 
 const dossierLogos = path.join(__dirname, '..', '..', 'uploads', 'logos');
+const dossierAvatars = path.join(__dirname, '..', '..', 'uploads', 'avatars');
 fs.mkdirSync(dossierLogos, { recursive: true });
+fs.mkdirSync(dossierAvatars, { recursive: true });
 
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, dossierLogos),
+  destination: (req, file, cb) => {
+    // Photos de profil → dossier avatars ; sinon logos
+    if (file.fieldname === 'photo') return cb(null, dossierAvatars);
+    cb(null, dossierLogos);
+  },
   filename: (req, file, cb) => {
     const ext = path.extname(file.originalname) || '.png';
-    // etablissementId dans le nom du fichier -> écrase l'ancien logo à chaque upload
-    cb(null, `${req.user.etablissementId}${ext}`);
+    if (file.fieldname === 'photo') {
+      // userId dans le nom du fichier -> écrase l'ancienne photo à chaque upload
+      cb(null, `avatar-${req.user.id}${ext}`);
+    } else {
+      // etablissementId dans le nom du fichier -> écrase l'ancien logo à chaque upload
+      cb(null, `${req.user.etablissementId}${ext}`);
+    }
   },
 });
 

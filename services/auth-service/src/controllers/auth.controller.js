@@ -394,6 +394,29 @@ if (user.etablissement && !user.etablissement.actif) {
       return res.status(500).json({ error: 'Erreur serveur lors de l\'upload du logo' });
     }
   },
+  // ── PATCH /auth/photo-profil ───────────────────────────────────
+  uploadPhotoProfil: async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: 'Aucun fichier reçu' });
+      }
+
+      // URL absolue et accessible depuis les téléphones
+      const baseUrl = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
+      const photoUrl = `${baseUrl}/uploads/avatars/${req.file.filename}`;
+
+      await prisma.user.update({
+        where: { id: req.user.id },
+        data:  { photoUrl },
+      });
+
+      return res.json({ message: 'Photo de profil mise à jour', photoUrl });
+    } catch (err) {
+      console.error('[UploadPhotoProfil]', err);
+      return res.status(500).json({ error: 'Erreur serveur lors de l\'upload de la photo' });
+    }
+  },
+
   // ── GET /auth/superadmin/etablissements ────────────────────────
   getEtablissements: async (req, res) => {
     if (req.user.role !== 'super_admin') {
