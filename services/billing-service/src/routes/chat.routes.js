@@ -6,22 +6,12 @@ const path    = require('path');
 const crypto  = require('crypto');
 const { auth } = require('../middleware/auth');
 const { prisma } = require('../utils/db');
+const { uploadFichier } = require('../utils/storage');
 
 // ── Multer config (pièces jointes + photo de groupe) ────────────
-// Crée le dossier d'upload s'il n'existe pas (Render : disque éphémère)
-const chatUploadDir = path.join(__dirname, '../../uploads/chat');
-require('fs').mkdirSync(chatUploadDir, { recursive: true });
-
-const chatStorage = multer.diskStorage({
-  destination: path.join(__dirname, '../../uploads/chat'),
-  filename: (req, file, cb) => {
-    const unique = crypto.randomBytes(8).toString('hex');
-    cb(null, `${unique}${path.extname(file.originalname)}`);
-  },
-});
-
+// Fichier gardé en mémoire puis envoyé vers Supabase Storage
 const uploadChat = multer({
-  storage: chatStorage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 20 * 1024 * 1024 }, // 20 Mo
   fileFilter: (req, file, cb) => {
     const allowed = [
@@ -724,9 +714,16 @@ router.post('/groups/:id/pieces-jointes', uploadChat.single('fichier'), async (r
 
     if (!req.file) return res.status(400).json({ error: 'Fichier manquant' });
 
+    const url = await uploadFichier({
+      buffer: req.file.buffer,
+      nom: `${crypto.randomBytes(8).toString('hex')}${path.extname(req.file.originalname)}`,
+      dossier: 'chat',
+      contentType: req.file.mimetype,
+    });
+
     res.status(201).json({
       nom: req.file.originalname,
-      url: `/uploads/chat/${req.file.filename}`,
+      url,
       taille: req.file.size,
       type: req.file.mimetype,
     });
@@ -751,9 +748,16 @@ router.post('/privates/:id/pieces-jointes', uploadChat.single('fichier'), async 
 
     if (!req.file) return res.status(400).json({ error: 'Fichier manquant' });
 
+    const url = await uploadFichier({
+      buffer: req.file.buffer,
+      nom: `${crypto.randomBytes(8).toString('hex')}${path.extname(req.file.originalname)}`,
+      dossier: 'chat',
+      contentType: req.file.mimetype,
+    });
+
     res.status(201).json({
       nom: req.file.originalname,
-      url: `/uploads/chat/${req.file.filename}`,
+      url,
       taille: req.file.size,
       type: req.file.mimetype,
     });
@@ -777,7 +781,12 @@ router.patch('/groups/:id/photo', uploadChat.single('photo'), async (req, res) =
     }
     if (!req.file) return res.status(400).json({ error: 'Photo manquante' });
 
-    const photoUrl = `/uploads/chat/${req.file.filename}`;
+    const photoUrl = await uploadFichier({
+      buffer: req.file.buffer,
+      nom: `${crypto.randomBytes(8).toString('hex')}${path.extname(req.file.originalname)}`,
+      dossier: 'chat',
+      contentType: req.file.mimetype,
+    });
     await prisma.groupeChat.update({ where: { id }, data: { photoUrl } });
     res.json({ photoUrl });
   } catch (err) {

@@ -2,24 +2,14 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const path = require('path');
-const crypto = require('crypto');
 
 const { auth } = require('../middleware/auth');
 const ctrl = require('../controllers/library.controller');
 
 // ── Multer config (upload fichiers) ────────────────────────────
-const storage = multer.diskStorage({
-  destination: path.join(__dirname, '../../uploads'),
-  filename: (req, file, cb) => {
-    const unique = crypto.randomBytes(8).toString('hex');
-    const ext = path.extname(file.originalname);
-    cb(null, `${unique}${ext}`);
-  },
-});
-
+// Fichier gardé en mémoire puis envoyé vers Supabase Storage
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 20 * 1024 * 1024 }, // 20 Mo
   fileFilter: (req, file, cb) => {
     const allowed = [

@@ -10,7 +10,9 @@ const {
   serializeUser,
 } = require('../utils/helpers');
 const jwt          = require('jsonwebtoken');
+const path         = require('path');
 const EmailService = require('../../../../shared/email/emailService');
+const { uploadFichier } = require('../utils/storage');
 
 const AuthController = {
 
@@ -378,10 +380,16 @@ if (user.etablissement && !user.etablissement.actif) {
         return res.status(400).json({ error: 'Aucun établissement associé à ce compte' });
       }
  
-      // URL absolue et accessible depuis les téléphones du réseau local
-      // (même host que celui utilisé par ApiClient._devHost côté Flutter)
+      // Stockage permanent (Supabase Storage si configuré, sinon disque local)
+      const ext = path.extname(req.file.originalname) || '.png';
+      const url = await uploadFichier({
+        buffer: req.file.buffer,
+        nom: `${req.user.etablissementId}${ext}`,
+        dossier: 'logos',
+        contentType: req.file.mimetype,
+      });
       const baseUrl = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
-      const logoUrl = `${baseUrl}/uploads/logos/${req.file.filename}`;
+      const logoUrl = url.startsWith('http') ? url : `${baseUrl}${url}`;
  
       await prisma.etablissement.update({
         where: { id: req.user.etablissementId },
@@ -401,9 +409,16 @@ if (user.etablissement && !user.etablissement.actif) {
         return res.status(400).json({ error: 'Aucun fichier reçu' });
       }
 
-      // URL absolue et accessible depuis les téléphones
+      // Stockage permanent (Supabase Storage si configuré, sinon disque local)
+      const ext = path.extname(req.file.originalname) || '.png';
+      const url = await uploadFichier({
+        buffer: req.file.buffer,
+        nom: `avatar-${req.user.id}${ext}`,
+        dossier: 'avatars',
+        contentType: req.file.mimetype,
+      });
       const baseUrl = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
-      const photoUrl = `${baseUrl}/uploads/avatars/${req.file.filename}`;
+      const photoUrl = url.startsWith('http') ? url : `${baseUrl}${url}`;
 
       await prisma.user.update({
         where: { id: req.user.id },

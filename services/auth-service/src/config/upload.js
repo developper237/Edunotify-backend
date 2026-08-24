@@ -1,30 +1,10 @@
 // services/auth-service/src/config/upload.js
 const multer = require('multer');
-const path   = require('path');
-const fs     = require('fs');
 
-const dossierLogos = path.join(__dirname, '..', '..', 'uploads', 'logos');
-const dossierAvatars = path.join(__dirname, '..', '..', 'uploads', 'avatars');
-fs.mkdirSync(dossierLogos, { recursive: true });
-fs.mkdirSync(dossierAvatars, { recursive: true });
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    // Photos de profil → dossier avatars ; sinon logos
-    if (file.fieldname === 'photo') return cb(null, dossierAvatars);
-    cb(null, dossierLogos);
-  },
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname) || '.png';
-    if (file.fieldname === 'photo') {
-      // userId dans le nom du fichier -> écrase l'ancienne photo à chaque upload
-      cb(null, `avatar-${req.user.id}${ext}`);
-    } else {
-      // etablissementId dans le nom du fichier -> écrase l'ancien logo à chaque upload
-      cb(null, `${req.user.etablissementId}${ext}`);
-    }
-  },
-});
+// On garde le fichier en mémoire (buffer) : il est ensuite envoyé
+// vers Supabase Storage (utils/storage.js), ou écrit sur le disque
+// local en repli de développement.
+const storage = multer.memoryStorage();
 
 const fileFilter = (req, file, cb) => {
   const typesAutorises = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];

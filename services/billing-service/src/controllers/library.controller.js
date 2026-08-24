@@ -2,11 +2,13 @@
 const { prisma } = require('../utils/db');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
+const { uploadFichier, supprimerFichier } = require('../utils/storage');
 
 const UPLOAD_DIR = path.join(__dirname, '../../uploads');
 const MAX_TAILLE = 20 * 1024 * 1024; // 20 MO
 
-// Assurer que le dossier uploads existe
+// Assurer que le dossier uploads existe (repli local)
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 // ──────────────────────────────────────────────────────────────────
@@ -66,13 +68,20 @@ const uploaderDocument = async (req, res) => {
 
     if (!req.file) return res.status(400).json({ error: 'Aucun fichier fourni' });
     if (req.file.size > MAX_TAILLE) {
-      fs.unlinkSync(req.file.path);
       return res.status(400).json({ error: 'Le fichier dépasse 20 Mo' });
     }
 
     const categorie = req.body.categorie || 'autre';
     const description = req.body.description || null;
     const nom = req.file.originalname;
+
+    // Stockage permanent (Supabase Storage si configuré, sinon disque local)
+    const urlFichier = await uploadFichier({
+      buffer: req.file.buffer,
+      nom: `${crypto.randomBytes(8).toString('hex')}${path.extname(nom)}`,
+      dossier: 'library',
+      contentType: req.file.mimetype,
+    });
 
     const doc = await prisma.document.create({
       data: {
@@ -81,7 +90,7 @@ const uploaderDocument = async (req, res) => {
         categorie,
         typeFichier: req.file.mimetype,
         tailleOctets: req.file.size,
-        urlFichier: `/uploads/${req.file.filename}`,
+        urlFichier,
         etablissementId: etabId,
         uploadeParId: userId,
       },
@@ -127,6 +136,10 @@ const telechargerDocument = async (req, res) => {
       data: { nbTelechargements: { increment: 1 } },
     });
 
+    // Supabase : redirection directe vers l'URL publique
+    if (doc.urlFichier.startsWith('http')) {
+      return res.redirect(doc.urlFichier);
+    }
     const filePath = path.join(__dirname, '../..', doc.urlFichier);
     return res.download(filePath, doc.nom);
   } catch (err) {
@@ -150,8 +163,7 @@ const supprimerDocument = async (req, res) => {
       return res.status(403).json({ error: 'Non autorisé' });
     }
 
-    const filePath = path.join(__dirname, '../..', doc.urlFichier);
-    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    await supprimerFichier(doc.urlFichier);
 
     await prisma.document.delete({ where: { id: doc.id } });
     return res.json({ message: 'Document supprimé' });
