@@ -21,12 +21,16 @@ const genererCodeInvitation = () => {
 router.get('/groups', async (req, res) => {
   try {
     const etablissementId = req.headers['x-etab-id'];
+    const userId = req.headers['x-user-id'];
     if (!etablissementId) {
       return res.status(400).json({ error: 'etablissementId requis' });
     }
 
+    // Un groupe n'est visible que par les membres qui l'ont rejoint (via le code)
     const groupes = await prisma.groupeChat.findMany({
-      where: { etablissementId },
+      where: userId
+        ? { etablissementId, membres: { some: { userId } } }
+        : { etablissementId },
       include: {
         _count: { select: { membres: true, messages: true } },
         messages: { orderBy: { createdAt: 'desc' }, take: 1 },
@@ -228,6 +232,20 @@ router.get('/groups/:id/messages', async (req, res) => {
       take: limit,
     });
 
+    // Marquer les messages de groupe comme lus pour cet utilisateur
+    if (userId) {
+      const nonLus = messages.filter(
+        (m) => m.userId !== userId && !(m.luPar || []).includes(userId)
+      );
+      for (const m of nonLus) {
+        const luPar = m.luPar || [];
+        await prisma.messageGroupe.update({
+          where: { id: m.id },
+          data: { luPar: [...luPar, userId] },
+        });
+      }
+    }
+
     res.json({ messages });
   } catch (err) {
     console.error('[Chat] Erreur GET /groups/:id/messages:', err);
@@ -273,6 +291,7 @@ router.post('/groups/:id/messages', async (req, res) => {
         groupId: id,
         userId,
         texte,
+        luPar: [userId], // l'expéditeur a déjà "lu" son propre message
       },
       include: {
         user: { select: { id: true, nom: true, prenom: true, photoUrl: true } },
@@ -307,6 +326,252 @@ router.delete('/groups/:id', async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     console.error('[Chat] Erreur DELETE /groups/:id:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════
+// CHAT PRIVÉ (1-à-1, même établissement)
+// ══════════════════════════════════════════════════════════════════
+
+// Normalise l'ordre des deux participants (userA = id lexicographiquement plus petit)
+const pairesConversation = (a, b) => (a < b ? [a, b] : [b, a]);
+
+// ── GET /chat/utilisateurs — Tous les utilisateurs de l'établissement ──
+router.get('/utilisateurs', async (req, res) => {
+  try {
+    const etablissementId = req.headers['x-etab-id'];
+    const userId = req.headers['x-user-id'];
+    if (!etablissementId) {
+      return res.status(400).json({ error: 'etablissementId requis' });
+    }
+
+    const utilisateurs = await prisma.user.findMany({
+      where: { etablissementId },
+      select: {
+        id: true,
+        nom: true,
+        prenom: true,
+        email: true,
+        role: true,
+        photoUrl: true,
+        classeEtudiantId: true,
+      },
+      orderBy: { prenom: 'asc' },
+    });
+
+    const result = utilisateurs
+      .filter((u) => u.id !== userId)
+      .map((u) => ({
+        id: u.id,
+        nom: u.nom,
+        prenom: u.prenom,
+        email: u.email,
+        role: u.role,
+        photoUrl: u.photoUrl,
+      }));
+
+    res.json({ utilisateurs: result });
+  } catch (err) {
+    console.error('[Chat] Erreur GET /utilisateurs:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ── GET /chat/privates — Liste des conversations privées de l'utilisateur ──
+router.get('/privates', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'];
+    const etablissementId = req.headers['x-etab-id'];
+    if (!userId) {
+      return res.status(400).json({ error: 'userId requis' });
+    }
+
+    const conversations = await prisma.conversationPrivee.findMany({
+      where: {
+        OR: [{ userAId: userId }, { userBId: userId }],
+        ...(etablissementId ? { etablissementId } : {}),
+      },
+      include: {
+        initiateur: { select: { id: true, nom: true, prenom: true, photoUrl: true } },
+        invite: { select: { id: true, nom: true, prenom: true, photoUrl: true } },
+        messages: { orderBy: { createdAt: 'desc' }, take: 1 },
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    const result = conversations.map((c) => {
+      const autre =
+        c.userAId === userId ? c.invite : c.initiateur;
+      const dernier = c.messages[0] ?? null;
+      return {
+        id: c.id,
+        autreId: autre.id,
+        autreNom: autre.nom,
+        autrePrenom: autre.prenom,
+        autrePhotoUrl: autre.photoUrl,
+        dernierMessage: dernier?.texte ?? null,
+        dernierMessageLe: dernier?.createdAt ?? null,
+        dernierMessageDeMoi: dernier ? dernier.userId === userId : false,
+        nonLus: dernier && !dernier.lu && dernier.userId !== userId ? 1 : 0,
+      };
+    });
+
+    res.json({ conversations: result });
+  } catch (err) {
+    console.error('[Chat] Erreur GET /privates:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ── POST /chat/privates — Créer / retrouver une conversation avec un utilisateur ──
+router.post('/privates', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'];
+    const etablissementId = req.headers['x-etab-id'];
+    const { autreId } = req.body;
+
+    if (!userId || !autreId || !etablissementId) {
+      return res.status(400).json({ error: 'userId, autreId et etablissementId requis' });
+    }
+    if (userId === autreId) {
+      return res.status(400).json({ error: 'Impossible de discuter avec soi-même' });
+    }
+
+    // Vérifier que l'autre utilisateur appartient au même établissement
+    const autre = await prisma.user.findUnique({
+      where: { id: autreId },
+      select: { etablissementId: true },
+    });
+    if (!autre || autre.etablissementId !== etablissementId) {
+      return res.status(403).json({ error: 'Utilisateur hors de votre établissement' });
+    }
+
+    const [a, b] = pairesConversation(userId, autreId);
+    const conversation = await prisma.conversationPrivee.upsert({
+      where: { userAId_userBId: { userAId: a, userBId: b } },
+      create: { userAId: a, userBId: b, etablissementId },
+      update: {},
+    });
+
+    res.status(201).json({ conversation: { id: conversation.id } });
+  } catch (err) {
+    console.error('[Chat] Erreur POST /privates:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ── GET /chat/privates/:id/messages — Lister les messages privés ──
+router.get('/privates/:id/messages', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'];
+    const { id } = req.params;
+    if (!userId) {
+      return res.status(400).json({ error: 'userId requis' });
+    }
+
+    const conversation = await prisma.conversationPrivee.findUnique({ where: { id } });
+    if (!conversation) {
+      return res.status(404).json({ error: 'Conversation introuvable' });
+    }
+    if (conversation.userAId !== userId && conversation.userBId !== userId) {
+      return res.status(403).json({ error: 'Accès refusé' });
+    }
+
+    const messages = await prisma.messagePrive.findMany({
+      where: { conversationId: id },
+      include: { user: { select: { id: true, nom: true, prenom: true, photoUrl: true } } },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    // Marquer les messages reçus comme lus
+    await prisma.messagePrive.updateMany({
+      where: { conversationId: id, userId: { not: userId }, lu: false },
+      data: { lu: true },
+    });
+
+    res.json({ messages });
+  } catch (err) {
+    console.error('[Chat] Erreur GET /privates/:id/messages:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ── POST /chat/privates/:id/messages — Envoyer un message privé ──
+router.post('/privates/:id/messages', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'];
+    const { id } = req.params;
+    const { texte } = req.body;
+
+    if (!texte || !userId) {
+      return res.status(400).json({ error: 'texte et userId requis' });
+    }
+
+    const conversation = await prisma.conversationPrivee.findUnique({ where: { id } });
+    if (!conversation) {
+      return res.status(404).json({ error: 'Conversation introuvable' });
+    }
+    if (conversation.userAId !== userId && conversation.userBId !== userId) {
+      return res.status(403).json({ error: 'Accès refusé' });
+    }
+
+    const message = await prisma.messagePrive.create({
+      data: { conversationId: id, userId, texte },
+      include: { user: { select: { id: true, nom: true, prenom: true, photoUrl: true } } },
+    });
+
+    await prisma.conversationPrivee.update({ where: { id }, data: { updatedAt: new Date() } });
+
+    res.status(201).json(message);
+  } catch (err) {
+    console.error('[Chat] Erreur POST /privates/:id/messages:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ── GET /chat/non-lus — Nombre total de messages non lus (privés + groupes) ──
+router.get('/non-lus', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'];
+    if (!userId) {
+      return res.status(400).json({ error: 'userId requis' });
+    }
+
+    // Messages privés non lus (adressés à l'utilisateur)
+    const conversations = await prisma.conversationPrivee.findMany({
+      where: { OR: [{ userAId: userId }, { userBId: userId }] },
+      select: { id: true },
+    });
+    const convIds = conversations.map((c) => c.id);
+
+    const privatesNonLus = convIds.length
+      ? await prisma.messagePrive.count({
+          where: { conversationId: { in: convIds }, userId: { not: userId }, lu: false },
+        })
+      : 0;
+
+    // Messages de groupe non lus (l'utilisateur n'est pas dans luPar)
+    const groupes = await prisma.membreGroupe.findMany({
+      where: { userId },
+      select: { groupId: true },
+    });
+    const groupeIds = groupes.map((g) => g.groupId);
+
+    let groupesNonLus = 0;
+    if (groupeIds.length) {
+      const messagesGroupes = await prisma.messageGroupe.findMany({
+        where: { groupId: { in: groupeIds } },
+        select: { id: true, userId: true, luPar: true },
+      });
+      groupesNonLus = messagesGroupes.filter(
+        (m) => m.userId !== userId && !(m.luPar || []).includes(userId)
+      ).length;
+    }
+
+    res.json({ count: privatesNonLus + groupesNonLus });
+  } catch (err) {
+    console.error('[Chat] Erreur GET /non-lus:', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
