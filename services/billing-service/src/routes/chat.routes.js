@@ -34,16 +34,28 @@ router.get('/groups', async (req, res) => {
       orderBy: { createdAt: 'desc' },
     });
 
-    const result = groupes.map((g) => ({
-      id: g.id,
-      nom: g.nom,
-      codeInvitation: g.codeInvitation,
-      nbMembres: g._count.membres,
-      dernierMessage: g.messages[0]?.texte ?? null,
-      dernierMessageLe: g.messages[0]?.createdAt ?? null,
-      creeParId: g.creeParId,
-      createdAt: g.createdAt,
-    }));
+    const result = [];
+    for (const g of groupes) {
+      // Backfill: les groupes créés avant la fonctionnalité n'ont pas de code
+      if (!g.codeInvitation) {
+        let codeInvitation = genererCodeInvitation();
+        while (await prisma.groupeChat.findUnique({ where: { codeInvitation } })) {
+          codeInvitation = genererCodeInvitation();
+        }
+        await prisma.groupeChat.update({ where: { id: g.id }, data: { codeInvitation } });
+        g.codeInvitation = codeInvitation;
+      }
+      result.push({
+        id: g.id,
+        nom: g.nom,
+        codeInvitation: g.codeInvitation,
+        nbMembres: g._count.membres,
+        dernierMessage: g.messages[0]?.texte ?? null,
+        dernierMessageLe: g.messages[0]?.createdAt ?? null,
+        creeParId: g.creeParId,
+        createdAt: g.createdAt,
+      });
+    }
 
     res.json({ groupes: result });
   } catch (err) {

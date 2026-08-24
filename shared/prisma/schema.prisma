@@ -662,7 +662,7 @@ model ReponseExamen {
 model GroupeChat {
   id              String   @id @default(cuid())
   nom             String
-  codeInvitation  String   @unique
+  codeInvitation  String?  @unique
   etablissementId String
   classeId        String?
   creeParId       String
