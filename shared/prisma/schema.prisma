@@ -667,6 +667,7 @@ model GroupeChat {
   id              String   @id @default(cuid())
   nom             String
   codeInvitation  String?  @unique
+  photoUrl        String?
   etablissementId String
   classeId        String?
   creeParId       String
@@ -693,12 +694,13 @@ model MembreGroupe {
 }
 
 model MessageGroupe {
-  id        String   @id @default(cuid())
-  groupId   String
-  userId    String
-  texte     String
-  luPar     Json? // tableau d'ids d'utilisateurs qui ont lu
-  createdAt DateTime @default(now())
+  id           String   @id @default(cuid())
+  groupId      String
+  userId       String
+  texte        String
+  pieceJointe  Json? // { nom, url, taille, type }
+  luPar        Json? // tableau d'ids d'utilisateurs qui ont lu
+  createdAt    DateTime @default(now())
 
   groupe GroupeChat @relation(fields: [groupId], references: [id], onDelete: Cascade)
   user   User       @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -732,6 +734,7 @@ model MessagePrive {
   conversationId String
   userId         String
   texte          String
+  pieceJointe    Json? // { nom, url, taille, type }
   lu             Boolean  @default(false)
   createdAt      DateTime @default(now())
 

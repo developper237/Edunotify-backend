@@ -1,8 +1,49 @@
 // services/billing-service/src/routes/chat.routes.js
 const express = require('express');
 const router  = express.Router();
+const multer  = require('multer');
+const path    = require('path');
+const crypto  = require('crypto');
 const { auth } = require('../middleware/auth');
 const { prisma } = require('../utils/db');
+
+// ── Multer config (pièces jointes + photo de groupe) ────────────
+// Crée le dossier d'upload s'il n'existe pas (Render : disque éphémère)
+const chatUploadDir = path.join(__dirname, '../../uploads/chat');
+require('fs').mkdirSync(chatUploadDir, { recursive: true });
+
+const chatStorage = multer.diskStorage({
+  destination: path.join(__dirname, '../../uploads/chat'),
+  filename: (req, file, cb) => {
+    const unique = crypto.randomBytes(8).toString('hex');
+    cb(null, `${unique}${path.extname(file.originalname)}`);
+  },
+});
+
+const uploadChat = multer({
+  storage: chatStorage,
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20 Mo
+  fileFilter: (req, file, cb) => {
+    const allowed = [
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-powerpoint',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/zip',
+      'application/x-zip-compressed',
+      'image/jpeg',
+      'image/png',
+      'image/gif',
+      'image/webp',
+      'text/plain',
+    ];
+    if (allowed.includes(file.mimetype)) cb(null, true);
+    else cb(new Error('Type de fichier non autorisé'), false);
+  },
+});
 
 // URL du notification-service pour les push FCM (chat)
 const NOTIF_URL = process.env.NOTIF_URL || 'https://notification-service-1o8a.onrender.com';
@@ -89,6 +130,7 @@ router.get('/groups', async (req, res) => {
         id: g.id,
         nom: g.nom,
         codeInvitation: g.codeInvitation,
+        photoUrl: g.photoUrl,
         nbMembres: g._count.membres,
         nonLus: nonLusParGroupe[g.id] || 0,
         dernierMessage: g.messages[0]?.texte ?? null,
@@ -296,10 +338,13 @@ router.post('/groups/:id/messages', async (req, res) => {
     const userId = req.headers['x-user-id'];
     const etablissementId = req.headers['x-etab-id'];
     const { id } = req.params;
-    const { texte } = req.body;
+    const { texte, pieceJointe } = req.body;
 
-    if (!texte || !userId) {
-      return res.status(400).json({ error: 'texte et userId requis' });
+    if ((!texte || !texte.trim()) && !pieceJointe) {
+      return res.status(400).json({ error: 'texte ou pièce jointe requis' });
+    }
+    if (!userId) {
+      return res.status(400).json({ error: 'userId requis' });
     }
 
     // Isolation : vérifier que le groupe appartient à l'établissement de l'utilisateur
@@ -327,7 +372,8 @@ router.post('/groups/:id/messages', async (req, res) => {
       data: {
         groupId: id,
         userId,
-        texte,
+        texte: texte || '',
+        pieceJointe: pieceJointe || undefined,
         luPar: [userId], // l'expéditeur a déjà "lu" son propre message
       },
       include: {
@@ -359,11 +405,10 @@ router.post('/groups/:id/messages', async (req, res) => {
   }
 });
 
-// ── DELETE /chat/groups/:id — Supprimer un groupe (créateur/admin) ──
+// ── DELETE /chat/groups/:id — Supprimer un groupe (créateur uniquement) ──
 router.delete('/groups/:id', async (req, res) => {
   try {
     const userId = req.headers['x-user-id'];
-    const role = req.headers['x-user-role'];
     const { id } = req.params;
 
     const groupe = await prisma.groupeChat.findUnique({ where: { id } });
@@ -371,9 +416,9 @@ router.delete('/groups/:id', async (req, res) => {
       return res.status(404).json({ error: 'Groupe introuvable' });
     }
 
-    // Seul le créateur ou un admin peut supprimer
-    if (groupe.creeParId !== userId && !['admin', 'super_admin'].includes(role)) {
-      return res.status(403).json({ error: 'Non autorisé' });
+    // Seul le créateur peut supprimer le groupe
+    if (groupe.creeParId !== userId) {
+      return res.status(403).json({ error: 'Seul le créateur du groupe peut le supprimer' });
     }
 
     await prisma.groupeChat.delete({ where: { id } });
@@ -556,10 +601,13 @@ router.post('/privates/:id/messages', async (req, res) => {
   try {
     const userId = req.headers['x-user-id'];
     const { id } = req.params;
-    const { texte } = req.body;
+    const { texte, pieceJointe } = req.body;
 
-    if (!texte || !userId) {
-      return res.status(400).json({ error: 'texte et userId requis' });
+    if ((!texte || !texte.trim()) && !pieceJointe) {
+      return res.status(400).json({ error: 'texte ou pièce jointe requis' });
+    }
+    if (!userId) {
+      return res.status(400).json({ error: 'userId requis' });
     }
 
     const conversation = await prisma.conversationPrivee.findUnique({ where: { id } });
@@ -571,7 +619,12 @@ router.post('/privates/:id/messages', async (req, res) => {
     }
 
     const message = await prisma.messagePrive.create({
-      data: { conversationId: id, userId, texte },
+      data: {
+        conversationId: id,
+        userId,
+        texte: texte || '',
+        pieceJointe: pieceJointe || undefined,
+      },
       include: { user: { select: { id: true, nom: true, prenom: true, photoUrl: true } } },
     });
 
@@ -646,6 +699,157 @@ router.get('/non-lus', async (req, res) => {
     res.json({ count: privatesNonLus + groupesNonLus });
   } catch (err) {
     console.error('[Chat] Erreur GET /non-lus:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════
+// PIÈCES JOINTES & PHOTO DE GROUPE & SUPPRESSIONS
+// ══════════════════════════════════════════════════════════════════
+
+// ── POST /chat/groups/:id/pieces-jointes — Upload d'un fichier ──
+router.post('/groups/:id/pieces-jointes', uploadChat.single('fichier'), async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'];
+    const { id } = req.params;
+    if (!userId) return res.status(400).json({ error: 'userId requis' });
+
+    // Vérifier que le groupe existe et que l'utilisateur est membre
+    const groupe = await prisma.groupeChat.findUnique({ where: { id } });
+    if (!groupe) return res.status(404).json({ error: 'Groupe introuvable' });
+    const membre = await prisma.membreGroupe.findUnique({
+      where: { groupId_userId: { groupId: id, userId } },
+    });
+    if (!membre) return res.status(403).json({ error: 'Vous n\'êtes pas membre de ce groupe' });
+
+    if (!req.file) return res.status(400).json({ error: 'Fichier manquant' });
+
+    res.status(201).json({
+      nom: req.file.originalname,
+      url: `/uploads/chat/${req.file.filename}`,
+      taille: req.file.size,
+      type: req.file.mimetype,
+    });
+  } catch (err) {
+    console.error('[Chat] Erreur upload groupe:', err);
+    res.status(500).json({ error: err.message || 'Erreur serveur' });
+  }
+});
+
+// ── POST /chat/privates/:id/pieces-jointes — Upload d'un fichier ──
+router.post('/privates/:id/pieces-jointes', uploadChat.single('fichier'), async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'];
+    const { id } = req.params;
+    if (!userId) return res.status(400).json({ error: 'userId requis' });
+
+    const conversation = await prisma.conversationPrivee.findUnique({ where: { id } });
+    if (!conversation) return res.status(404).json({ error: 'Conversation introuvable' });
+    if (conversation.userAId !== userId && conversation.userBId !== userId) {
+      return res.status(403).json({ error: 'Accès refusé' });
+    }
+
+    if (!req.file) return res.status(400).json({ error: 'Fichier manquant' });
+
+    res.status(201).json({
+      nom: req.file.originalname,
+      url: `/uploads/chat/${req.file.filename}`,
+      taille: req.file.size,
+      type: req.file.mimetype,
+    });
+  } catch (err) {
+    console.error('[Chat] Erreur upload privé:', err);
+    res.status(500).json({ error: err.message || 'Erreur serveur' });
+  }
+});
+
+// ── PATCH /chat/groups/:id/photo — Photo de profil du groupe (créateur) ──
+router.patch('/groups/:id/photo', uploadChat.single('photo'), async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'];
+    const { id } = req.params;
+    if (!userId) return res.status(400).json({ error: 'userId requis' });
+
+    const groupe = await prisma.groupeChat.findUnique({ where: { id } });
+    if (!groupe) return res.status(404).json({ error: 'Groupe introuvable' });
+    if (groupe.creeParId !== userId) {
+      return res.status(403).json({ error: 'Seul le créateur peut modifier la photo' });
+    }
+    if (!req.file) return res.status(400).json({ error: 'Photo manquante' });
+
+    const photoUrl = `/uploads/chat/${req.file.filename}`;
+    await prisma.groupeChat.update({ where: { id }, data: { photoUrl } });
+    res.json({ photoUrl });
+  } catch (err) {
+    console.error('[Chat] Erreur photo groupe:', err);
+    res.status(500).json({ error: err.message || 'Erreur serveur' });
+  }
+});
+
+// ── DELETE /chat/groups/:id/messages/:messageId — Supprimer un message (auteur) ──
+router.delete('/groups/:id/messages/:messageId', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'];
+    const { id, messageId } = req.params;
+    if (!userId) return res.status(400).json({ error: 'userId requis' });
+
+    const message = await prisma.messageGroupe.findUnique({ where: { id: messageId } });
+    if (!message || message.groupId !== id) {
+      return res.status(404).json({ error: 'Message introuvable' });
+    }
+    if (message.userId !== userId) {
+      return res.status(403).json({ error: 'Seul l\'auteur du message peut le supprimer' });
+    }
+
+    await prisma.messageGroupe.delete({ where: { id: messageId } });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Chat] Erreur DELETE message groupe:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ── DELETE /chat/privates/:id/messages/:messageId — Supprimer un message (auteur) ──
+router.delete('/privates/:id/messages/:messageId', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'];
+    const { id, messageId } = req.params;
+    if (!userId) return res.status(400).json({ error: 'userId requis' });
+
+    const message = await prisma.messagePrive.findUnique({ where: { id: messageId } });
+    if (!message || message.conversationId !== id) {
+      return res.status(404).json({ error: 'Message introuvable' });
+    }
+    if (message.userId !== userId) {
+      return res.status(403).json({ error: 'Seul l\'auteur du message peut le supprimer' });
+    }
+
+    await prisma.messagePrive.delete({ where: { id: messageId } });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Chat] Erreur DELETE message privé:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ── DELETE /chat/privates/:id — Supprimer la conversation (participant) ──
+router.delete('/privates/:id', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'];
+    const { id } = req.params;
+    if (!userId) return res.status(400).json({ error: 'userId requis' });
+
+    const conversation = await prisma.conversationPrivee.findUnique({ where: { id } });
+    if (!conversation) return res.status(404).json({ error: 'Conversation introuvable' });
+    if (conversation.userAId !== userId && conversation.userBId !== userId) {
+      return res.status(403).json({ error: 'Accès refusé' });
+    }
+
+    // Supprime la conversation + ses messages (cascade)
+    await prisma.conversationPrivee.delete({ where: { id } });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Chat] Erreur DELETE conversation:', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
