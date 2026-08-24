@@ -29,6 +29,16 @@ const uploadChat = multer({
       'image/gif',
       'image/webp',
       'text/plain',
+      // Audio (messages vocaux)
+      'audio/mpeg',
+      'audio/mp4',
+      'audio/m4a',
+      'audio/x-m4a',
+      'audio/aac',
+      'audio/wav',
+      'audio/x-wav',
+      'audio/webm',
+      'audio/ogg',
     ];
     if (allowed.includes(file.mimetype)) cb(null, true);
     else cb(new Error('Type de fichier non autorisé'), false);
