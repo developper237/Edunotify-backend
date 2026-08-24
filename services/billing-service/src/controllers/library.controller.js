@@ -131,16 +131,28 @@ const telechargerDocument = async (req, res) => {
     const doc = await prisma.document.findUnique({ where: { id: req.params.id } });
     if (!doc) return res.status(404).json({ error: 'Document introuvable' });
 
+    // Supabase : redirection directe vers l'URL publique (le client suit la redirection)
+    if (doc.urlFichier.startsWith('http')) {
+      await prisma.document.update({
+        where: { id: doc.id },
+        data: { nbTelechargements: { increment: 1 } },
+      });
+      return res.redirect(doc.urlFichier);
+    }
+
+    // Repli local (dev) : le fichier doit exister sur le disque
+    const filePath = path.join(__dirname, '../..', doc.urlFichier);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({
+        error:
+          'Fichier introuvable sur le serveur. Ce document a été importé avant la migration vers le stockage permanent — réimportez-le pour le rendre téléchargeable.',
+      });
+    }
+
     await prisma.document.update({
       where: { id: doc.id },
       data: { nbTelechargements: { increment: 1 } },
     });
-
-    // Supabase : redirection directe vers l'URL publique
-    if (doc.urlFichier.startsWith('http')) {
-      return res.redirect(doc.urlFichier);
-    }
-    const filePath = path.join(__dirname, '../..', doc.urlFichier);
     return res.download(filePath, doc.nom);
   } catch (err) {
     console.error('[telechargerDocument]', err.message);
