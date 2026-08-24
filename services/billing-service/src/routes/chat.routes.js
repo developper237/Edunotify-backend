@@ -4,6 +4,27 @@ const router  = express.Router();
 const { auth } = require('../middleware/auth');
 const { prisma } = require('../utils/db');
 
+// URL du notification-service pour les push FCM (chat)
+const NOTIF_URL = process.env.NOTIF_URL || 'https://notification-service-1o8a.onrender.com';
+
+// Envoie un push FCM aux destinataires via le notification-service
+const envoyerPushChat = async (tokens, titre, contenu, data = {}) => {
+  const valides = (tokens || []).filter(Boolean);
+  if (!valides.length) return;
+  try {
+    await fetch(`${NOTIF_URL}/notifications/push`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tokens: valides, titre, contenu, data }),
+    });
+  } catch (err) {
+    console.warn('[Chat] Push FCM échec:', err.message);
+  }
+};
+
+// Nom complet d'un expéditeur pour le contenu du push
+const nomExpediteur = (u) => `${u?.prenom ?? ''} ${u?.nom ?? ''}`.trim();
+
 // ── Tous les utilisateurs authentifiés peuvent accéder au chat ──
 router.use(auth);
 
@@ -38,6 +59,21 @@ router.get('/groups', async (req, res) => {
       orderBy: { createdAt: 'desc' },
     });
 
+    // Nombre de messages non lus par groupe (pour les badges)
+    let nonLusParGroupe = {};
+    if (userId && groupes.length) {
+      const msgs = await prisma.messageGroupe.findMany({
+        where: { groupId: { in: groupes.map((g) => g.id) } },
+        select: { id: true, groupId: true, userId: true, luPar: true },
+      });
+      nonLusParGroupe = msgs.reduce((acc, m) => {
+        if (m.userId !== userId && !(m.luPar || []).includes(userId)) {
+          acc[m.groupId] = (acc[m.groupId] || 0) + 1;
+        }
+        return acc;
+      }, {});
+    }
+
     const result = [];
     for (const g of groupes) {
       // Backfill: les groupes créés avant la fonctionnalité n'ont pas de code
@@ -54,6 +90,7 @@ router.get('/groups', async (req, res) => {
         nom: g.nom,
         codeInvitation: g.codeInvitation,
         nbMembres: g._count.membres,
+        nonLus: nonLusParGroupe[g.id] || 0,
         dernierMessage: g.messages[0]?.texte ?? null,
         dernierMessageLe: g.messages[0]?.createdAt ?? null,
         creeParId: g.creeParId,
@@ -268,7 +305,7 @@ router.post('/groups/:id/messages', async (req, res) => {
     // Isolation : vérifier que le groupe appartient à l'établissement de l'utilisateur
     const groupe = await prisma.groupeChat.findUnique({
       where: { id },
-      select: { etablissementId: true },
+      select: { etablissementId: true, nom: true },
     });
     if (!groupe) {
       return res.status(404).json({ error: 'Groupe introuvable' });
@@ -297,6 +334,23 @@ router.post('/groups/:id/messages', async (req, res) => {
         user: { select: { id: true, nom: true, prenom: true, photoUrl: true } },
       },
     });
+
+    // ── Push FCM aux autres membres du groupe ──
+    try {
+      const membres = await prisma.membreGroupe.findMany({
+        where: { groupId: id, userId: { not: userId } },
+        select: { user: { select: { fcmToken: true } } },
+      });
+      const tokens = membres.map((m) => m.user.fcmToken).filter(Boolean);
+      envoyerPushChat(
+        tokens,
+        `Nouveau message dans ${groupe.nom}`,
+        `${nomExpediteur(message.user)}: ${texte.slice(0, 100)}`,
+        { type: 'chat_groupe', groupeId: id }
+      );
+    } catch (pushErr) {
+      console.warn('[Chat] Push groupe échec:', pushErr.message);
+    }
 
     res.status(201).json(message);
   } catch (err) {
@@ -522,6 +576,26 @@ router.post('/privates/:id/messages', async (req, res) => {
     });
 
     await prisma.conversationPrivee.update({ where: { id }, data: { updatedAt: new Date() } });
+
+    // ── Push FCM à l'autre participant ──
+    try {
+      const autreId =
+        conversation.userAId === userId ? conversation.userBId : conversation.userAId;
+      const autre = await prisma.user.findUnique({
+        where: { id: autreId },
+        select: { fcmToken: true },
+      });
+      if (autre?.fcmToken) {
+        envoyerPushChat(
+          [autre.fcmToken],
+          'Nouveau message',
+          `${nomExpediteur(message.user)}: ${texte.slice(0, 100)}`,
+          { type: 'chat_prive', conversationId: id }
+        );
+      }
+    } catch (pushErr) {
+      console.warn('[Chat] Push privé échec:', pushErr.message);
+    }
 
     res.status(201).json(message);
   } catch (err) {

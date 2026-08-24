@@ -532,6 +532,26 @@ app.post('/notifications/interne', async (req, res) => {
   }
 });
 
+// ══════════════════════════════════════════════════════════════════
+// POST /notifications/push — Envoi FCM pur (utilisé par le chat)
+// Appelé par d'autres services (billing-service) sans créer de
+// Notification en base, juste un push.
+// ══════════════════════════════════════════════════════════════════
+
+app.post('/notifications/push', async (req, res) => {
+  const { tokens, titre, contenu, data } = req.body;
+  if (!tokens?.length || !titre)
+    return res.status(400).json({ error: 'tokens et titre requis' });
+
+  try {
+    await sendPushToMany(tokens, titre, contenu, data || {});
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[Notif] push:', err);
+    return res.status(500).json({ error: 'Erreur envoi push' });
+  }
+});
+
 app.delete('/notifications/:id', auth, async (req, res) => {
   try {
     await prisma.notificationDestinataire.delete({
