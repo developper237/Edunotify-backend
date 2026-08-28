@@ -497,17 +497,19 @@ app.post('/presence/sessions/:id/envoyer-rapport',
 
       // 6. Push FCM si firebase disponible
       try {
-        const { sendPushToOne } = require('./firebase');
+        const { sendPushToMany } = require('./firebase');
+        const tokens = [];
         for (const chef of chefs) {
-          if (chef.fcmToken) {
-            await sendPushToOne(
-              chef.fcmToken,
-              '📋 Nouveau rapport d\'appel',
-              `${delegue.prenom} ${delegue.nom} — ${session.matiere}`,
-              { type: 'rapport_appel', notifId: notif.id },
-            );
-          }
+          if (chef.fcmToken) tokens.push(chef.fcmToken);
         }
+        // Multicast (batch de 500 max par appel) — plus scalable qu'une
+        // boucle de pushes séquentiels.
+        await sendPushToMany(
+          tokens,
+          '📋 Nouveau rapport d\'appel',
+          `${delegue.prenom} ${delegue.nom} — ${session.matiere}`,
+          { type: 'rapport_appel', notifId: notif.id },
+        );
       } catch (_) {
         // Firebase optionnel — on ignore l'erreur
       }

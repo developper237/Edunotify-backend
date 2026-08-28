@@ -259,6 +259,9 @@ model SessionPresence {
   // Presence associées, cf. le modèle Presence ci-dessous).
   classe    Classe     @relation(fields: [classeId], references: [id], onDelete: Cascade)
   presences Presence[]
+
+  @@index([classeId, actif])
+  @@index([delegueId, actif])
 }
 
 model Presence {
@@ -328,6 +331,7 @@ model NotificationDestinataire {
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([notificationId, userId])
+  @@index([userId, lue])
 }
 
 model ChoixSondage {
@@ -682,15 +686,19 @@ model GroupeChat {
 }
 
 model MembreGroupe {
-  id       String   @id @default(cuid())
-  groupId  String
-  userId   String
-  joinedAt DateTime @default(now())
+  id                   String   @id @default(cuid())
+  groupId              String
+  userId               String
+  joinedAt             DateTime @default(now())
+  dernierMessageLuLe   DateTime? // horodatage du dernier message de groupe lu par ce membre
+                                // → permet de compter les non-lus de façon scalaire (indexé),
+                                //   sans recharger tous les messages (évite la requête quadratique)
 
   groupe GroupeChat @relation(fields: [groupId], references: [id], onDelete: Cascade)
   user   User       @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([groupId, userId])
+  @@index([userId])
 }
 
 model MessageGroupe {

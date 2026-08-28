@@ -101,18 +101,29 @@ router.get('/groups', async (req, res) => {
     });
 
     // Nombre de messages non lus par groupe (pour les badges)
+    // Scalaire et indexé : on compare les messages plus récents que le
+    // dernier message lu par le membre (dernierMessageLuLe) — on ne recharge
+    // plus tous les messages du groupe (évite la requête quadratique).
     let nonLusParGroupe = {};
     if (userId && groupes.length) {
-      const msgs = await prisma.messageGroupe.findMany({
-        where: { groupId: { in: groupes.map((g) => g.id) } },
-        select: { id: true, groupId: true, userId: true, luPar: true },
+      const mesMembres = await prisma.membreGroupe.findMany({
+        where: { groupId: { in: groupes.map((g) => g.id) }, userId },
+        select: { groupId: true, dernierMessageLuLe: true },
       });
-      nonLusParGroupe = msgs.reduce((acc, m) => {
-        if (m.userId !== userId && !(m.luPar || []).includes(userId)) {
-          acc[m.groupId] = (acc[m.groupId] || 0) + 1;
-        }
-        return acc;
-      }, {});
+      const comptages = await Promise.all(
+        mesMembres.map((membre) =>
+          prisma.messageGroupe.count({
+            where: {
+              groupId: membre.groupId,
+              userId: { not: userId },
+              createdAt: membre.dernierMessageLuLe
+                ? { gt: membre.dernierMessageLuLe }
+                : undefined,
+            },
+          }).then((n) => ({ groupId: membre.groupId, n }))
+        )
+      );
+      nonLusParGroupe = Object.fromEntries(comptages.map((c) => [c.groupId, c.n]));
     }
 
     const result = [];
@@ -297,9 +308,12 @@ router.get('/groups/:id/messages', async (req, res) => {
       }
     }
 
+    const apres = req.query.apres; // récupération incrémentale (préfixe dates identiques valides)
     const where = { groupId: id };
     if (before) {
       where.createdAt = { lt: new Date(before) };
+    } else if (apres) {
+      where.createdAt = { gt: new Date(apres) };
     }
 
     const messages = await prisma.messageGroupe.findMany({
@@ -308,7 +322,7 @@ router.get('/groups/:id/messages', async (req, res) => {
         user: { select: { id: true, nom: true, prenom: true, photoUrl: true } },
       },
       orderBy: { createdAt: 'asc' },
-      take: limit,
+      take: apres ? undefined : limit,
     });
 
     // Marquer les messages de groupe comme lus pour cet utilisateur
@@ -321,6 +335,15 @@ router.get('/groups/:id/messages', async (req, res) => {
         await prisma.messageGroupe.update({
           where: { id: m.id },
           data: { luPar: [...luPar, userId] },
+        });
+      }
+      // Met à jour le curseur de lecture du membre → permet un comptage
+      // scalaire des non-lus (GET /groups) sans recharger tous les messages.
+      if (messages.length) {
+        const dernier = messages[messages.length - 1];
+        await prisma.membreGroupe.updateMany({
+          where: { groupId: id, userId },
+          data: { dernierMessageLuLe: dernier.createdAt },
         });
       }
     }
@@ -577,8 +600,12 @@ router.get('/privates/:id/messages', async (req, res) => {
       return res.status(403).json({ error: 'Accès refusé' });
     }
 
+    const apres = req.query.apres; // récupération incrémentale
     const messages = await prisma.messagePrive.findMany({
-      where: { conversationId: id },
+      where: {
+        conversationId: id,
+        ...(apres ? { createdAt: { gt: new Date(apres) } } : {}),
+      },
       include: { user: { select: { id: true, nom: true, prenom: true, photoUrl: true } } },
       orderBy: { createdAt: 'asc' },
     });
@@ -685,15 +712,28 @@ router.get('/non-lus', async (req, res) => {
     });
     const groupeIds = groupes.map((g) => g.groupId);
 
+    // Comptage scalaire et indexé grâce à dernierMessageLuLe (évite de recharger
+    // tous les messages du groupe pour compter les non-lus).
     let groupesNonLus = 0;
     if (groupeIds.length) {
-      const messagesGroupes = await prisma.messageGroupe.findMany({
-        where: { groupId: { in: groupeIds } },
-        select: { id: true, userId: true, luPar: true },
+      const mesMembres = await prisma.membreGroupe.findMany({
+        where: { groupId: { in: groupeIds }, userId },
+        select: { groupId: true, dernierMessageLuLe: true },
       });
-      groupesNonLus = messagesGroupes.filter(
-        (m) => m.userId !== userId && !(m.luPar || []).includes(userId)
-      ).length;
+      const comptages = await Promise.all(
+        mesMembres.map((membre) =>
+          prisma.messageGroupe.count({
+            where: {
+              groupId: membre.groupId,
+              userId: { not: userId },
+              createdAt: membre.dernierMessageLuLe
+                ? { gt: membre.dernierMessageLuLe }
+                : undefined,
+            },
+          })
+        )
+      );
+      groupesNonLus = comptages.reduce((a, b) => a + b, 0);
     }
 
     res.json({ count: privatesNonLus + groupesNonLus });
