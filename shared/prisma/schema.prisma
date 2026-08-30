@@ -8,6 +8,9 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  // Connexion directe pour `prisma db push` / migrations : le pooler Neon
+  // transactionnel ne supporte pas les opérations de schéma.
+  directUrl = env("DIRECT_URL")
 }
 
 enum Role {
