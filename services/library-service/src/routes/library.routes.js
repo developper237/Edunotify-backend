@@ -5,7 +5,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const ctrl = require('../controllers/library.controller');
-const { authenticate: auth } = require('../../../../shared/middleware/authJwt');
+const { authenticate: auth } = require('../middleware/authJwt');
 
 // ── Toutes les routes bibliothèque exigent un utilisateur authentifié ──
 router.use(auth);

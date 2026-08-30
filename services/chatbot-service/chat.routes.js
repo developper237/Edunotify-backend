@@ -2,7 +2,7 @@
 const express = require('express');
 const router  = express.Router();
 const { handleChatMessage, getChatHistory } = require('./chat.controller');
-const { authenticate: auth } = require('../../../shared/middleware/authJwt');
+const { authenticate: auth } = require('./authJwt');
 
 // ── Toutes les routes chatbot exigent un utilisateur authentifié ──
 router.use(auth);

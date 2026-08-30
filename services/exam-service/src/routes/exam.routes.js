@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const ctrl = require('../controllers/exam.controller');
-const { authenticate: auth } = require('../../../../shared/middleware/authJwt');
+const { authenticate: auth } = require('../middleware/authJwt');
 
 // ── Toutes les routes examen exigent un utilisateur authentifié ──
 router.use(auth);

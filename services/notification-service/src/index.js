@@ -21,7 +21,7 @@ app.use(express.json());
 // MIDDLEWARES
 // ══════════════════════════════════════════════════════════════════
 
-const { authenticate: auth, requireRole } = require('../../../shared/middleware/authJwt');
+const { authenticate: auth, requireRole } = require('./middleware/authJwt');
 
 // ══════════════════════════════════════════════════════════════════
 // UTILITAIRES

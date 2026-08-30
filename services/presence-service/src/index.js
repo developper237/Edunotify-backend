@@ -18,7 +18,7 @@ app.use(morgan('dev'));
 app.use(express.json({ limit: '20mb' })); // ← augmenté pour le PDF base64
 
 // ── Auth middleware (JWT unifié) ──────────────────────────────────
-const { authenticate: auth, requireRole } = require('../../../shared/middleware/authJwt');
+const { authenticate: auth, requireRole } = require('./middleware/authJwt');
 
 const genOTP = () =>
   Math.floor(100000 + Math.random() * 900000).toString();
