@@ -21,23 +21,7 @@ app.use(express.json());
 // MIDDLEWARES
 // ══════════════════════════════════════════════════════════════════
 
-const auth = (req, res, next) => {
-  req.user = {
-    id:              req.headers['x-user-id'],
-    role:            req.headers['x-user-role'],
-    etablissementId: req.headers['x-etab-id']   || null,
-    departementId:   req.headers['x-dept-id']   || null,
-    classeId:        req.headers['x-classe-id'] || null,
-  };
-  if (!req.user.id) return res.status(401).json({ error: 'Non authentifié' });
-  next();
-};
-
-const requireRole = (...roles) => (req, res, next) => {
-  if (!roles.includes(req.user.role))
-    return res.status(403).json({ error: 'Accès refusé' });
-  next();
-};
+const { authenticate: auth, requireRole } = require('../../../shared/middleware/authJwt');
 
 // ══════════════════════════════════════════════════════════════════
 // UTILITAIRES
@@ -576,6 +560,14 @@ app.post('/notifications/interne', async (req, res) => {
 // ══════════════════════════════════════════════════════════════════
 
 app.post('/notifications/push', async (req, res) => {
+  // Endpoint INTERNE : protégé par une clé partagée (INTERNAL_API_KEY)
+  // posée sur les services autorisés. Ne jamais exposer sans clé.
+  const secret = process.env.INTERNAL_API_KEY;
+  const provided = req.headers['x-internal-key'] || req.headers['x-api-key'];
+  if (!secret || provided !== secret) {
+    return res.status(401).json({ error: 'Clé interne invalide' });
+  }
+
   const { tokens, titre, contenu, data } = req.body;
   if (!tokens?.length || !titre)
     return res.status(400).json({ error: 'tokens et titre requis' });

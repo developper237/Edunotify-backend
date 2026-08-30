@@ -5,6 +5,10 @@ const path = require('path');
 const crypto = require('crypto');
 
 const ctrl = require('../controllers/library.controller');
+const { authenticate: auth } = require('../../../../shared/middleware/authJwt');
+
+// ── Toutes les routes bibliothèque exigent un utilisateur authentifié ──
+router.use(auth);
 
 // ── Multer config (upload fichiers) ────────────────────────────
 const storage = multer.diskStorage({

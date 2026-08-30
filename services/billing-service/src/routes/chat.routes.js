@@ -55,7 +55,10 @@ const envoyerPushChat = async (tokens, titre, contenu, data = {}) => {
   try {
     await fetch(`${NOTIF_URL}/notifications/push`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-internal-key': process.env.INTERNAL_API_KEY || '',
+      },
       body: JSON.stringify({ tokens: valides, titre, contenu, data }),
     });
   } catch (err) {

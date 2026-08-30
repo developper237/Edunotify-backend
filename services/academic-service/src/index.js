@@ -27,24 +27,7 @@ const mailer = nodemailer.createTransport({
 // MIDDLEWARES
 // ══════════════════════════════════════════════════════════════════
 
-const auth = (req, res, next) => {
-  req.user = {
-    id:            req.headers['x-user-id'],
-    role:          req.headers['x-user-role'],
-    departementId: req.headers['x-dept-id']   || null,
-    classeId:      req.headers['x-classe-id'] || null,
-  };
-  if (!req.user.id) return res.status(401).json({ error: 'Non authentifié' });
-  next();
-};
-
-const requireRole = (...roles) => (req, res, next) => {
-  // Permet de gérer à la fois requireRole('admin') et requireRole(['role1', 'role2'])
-  const flattenedRoles = roles.flat();
-  if (!flattenedRoles.includes(req.user.role))
-    return res.status(403).json({ error: 'Accès refusé' });
-  next();
-};
+const { authenticate: auth, requireRole } = require('../../../shared/middleware/authJwt');
 
 // ══════════════════════════════════════════════════════════════════
 // UTILITAIRES

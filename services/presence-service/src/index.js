@@ -17,22 +17,8 @@ app.use(cors());
 app.use(morgan('dev'));
 app.use(express.json({ limit: '20mb' })); // ← augmenté pour le PDF base64
 
-// ── Auth middleware ───────────────────────────────────────────────
-const auth = (req, res, next) => {
-  req.user = {
-    id:       req.headers['x-user-id'],
-    role:     req.headers['x-user-role'],
-    classeId: req.headers['x-classe-id'] || null,
-  };
-  if (!req.user.id) return res.status(401).json({ error: 'Non authentifié' });
-  next();
-};
-
-const requireRole = (...roles) => (req, res, next) => {
-  if (!roles.includes(req.user.role))
-    return res.status(403).json({ error: 'Accès refusé' });
-  next();
-};
+// ── Auth middleware (JWT unifié) ──────────────────────────────────
+const { authenticate: auth, requireRole } = require('../../../shared/middleware/authJwt');
 
 const genOTP = () =>
   Math.floor(100000 + Math.random() * 900000).toString();
