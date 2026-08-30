@@ -2,6 +2,7 @@
 
 const { validationResult } = require('express-validator');
 const { prisma }           = require('../utils/db');
+const hub                  = require('../hub/sseHub');
 
 // ── Résoudre les destinataires en liste d'IDs ─────────────────────
 const resolveDestinataires = async (destinataires, user) => {
@@ -171,6 +172,20 @@ const NotifController = {
         },
       });
 
+      // Diffusion temps réel (SSE) aux destinataires connectés.
+      for (const u of users) {
+        hub.broadcast('notification', {
+          type:        'nouvelle',
+          notificationId: notification.id,
+          titre,
+          contenu,
+          categorie,
+          destination: req.user.id,
+          createdAt:    notification.createdAt,
+        }, u.id);
+      }
+      hub.broadcast('refresh', { scope: 'notifications' });
+
       // TODO: Envoyer FCM push notifications aux users avec fcmToken
 
       return res.status(201).json({
@@ -182,6 +197,29 @@ const NotifController = {
       console.error('[Envoyer]', err);
       return res.status(500).json({ error: 'Erreur serveur' });
     }
+  },
+
+  // ── GET /notifications/stream (SSE) ─────────────────────────────
+  stream: (req, res) => {
+    // Le client se connecte et attend les événements poussés par le hub.
+    res.writeHead(200, {
+      'Content-Type':  'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      'Connection':    'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    // Heartbeat toutes les 25s pour éviter la fermeture par les proxies/idle.
+    const heartbeat = setInterval(() => {
+      try { res.write(': ping\n\n'); } catch (_) { /* fermé */ }
+    }, 25000);
+
+    hub.subscribe(req.user.id, res);
+
+    // Nettoyage à la déconnexion.
+    res.on('close', () => {
+      clearInterval(heartbeat);
+      hub.unsubscribe(req.user.id, res);
+    });
   },
 
   // ── POST /notifications/sondage ─────────────────────────────────
@@ -429,6 +467,19 @@ const NotifController = {
       });
     } catch (err) {
       console.error('[GetMesNotifications]', err);
+      return res.status(500).json({ error: 'Erreur serveur' });
+    }
+  },
+
+  // ── GET /notifications/non-lues ─────────────────────────────────
+  getNonLues: async (req, res) => {
+    try {
+      const count = await prisma.notificationDestinataire.count({
+        where: { userId: req.user.id, lue: false },
+      });
+      return res.json({ count });
+    } catch (err) {
+      console.error('[GetNonLues]', err);
       return res.status(500).json({ error: 'Erreur serveur' });
     }
   },

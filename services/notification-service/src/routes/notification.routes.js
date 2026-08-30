@@ -71,12 +71,27 @@ router.post('/sondage/:notifId/voter',
   NotifController.voter
 );
 
+// ── Flux temps réel (SSE) ────────────────────────────────────────
+// GET /notifications/stream
+// Connexion longue durée : pousse en direct les nouvelles notifications.
+router.get('/stream',
+  authenticate,
+  NotifController.stream
+);
+
 // ── Mes notifications ─────────────────────────────────────────────
 // GET /notifications/mes-notifications
 router.get('/mes-notifications',
   authenticate,
   NotifController.getMesNotifications
   
+);
+
+// ── Compteur de non-lues (badge navbar/cloche) ────────────────────
+// GET /notifications/non-lues
+router.get('/non-lues',
+  authenticate,
+  NotifController.getNonLues
 );
 
 // ── Marquer comme lu ──────────────────────────────────────────────
