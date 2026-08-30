@@ -6,6 +6,7 @@ const cors      = require('cors');
 const morgan    = require('morgan');
 const { PrismaClient } = require('../../../node_modules/.prisma/client');
 const { initFirebase, sendPushToOne, sendPushToMany } = require('./firebase');
+const hub = require('./hub/sseHub');
 
 const app    = express();
 const PORT   = process.env.PORT || 3003;
@@ -134,6 +135,18 @@ app.post('/notifications', auth, async (req, res) => {
         .catch(console.error);
     }
 
+    // Diffusion temps réel (SSE) aux destinataires connectés.
+    const payload = {
+      type: 'nouvelle',
+      notificationId: notif.id,
+      titre, contenu,
+      categorie: categorie || 'administratif',
+      destination: req.user.id,
+      createdAt: notif.createdAt,
+    };
+    for (const d of dests) hub.broadcast('notification', payload, d.id);
+    hub.broadcast('refresh', { scope: 'notifications' });
+
     return res.status(201).json({
       message:         `Envoyée à ${dests.length} destinataire(s)`,
       notificationId:  notif.id,
@@ -261,6 +274,30 @@ app.get('/notifications/non-lues', auth, async (req, res) => {
   } catch (err) {
     return res.status(500).json({ error: 'Erreur serveur' });
   }
+});
+
+// ══════════════════════════════════════════════════════════════════
+// GET /notifications/stream — Flux temps réel (SSE)
+// ══════════════════════════════════════════════════════════════════
+
+app.get('/notifications/stream', auth, (req, res) => {
+  res.writeHead(200, {
+    'Content-Type':     'text/event-stream',
+    'Cache-Control':    'no-cache, no-transform',
+    'Connection':       'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  // Heartbeat toutes les 25s pour éviter la fermeture par les proxies/idle.
+  const heartbeat = setInterval(() => {
+    try { res.write(': ping\n\n'); } catch (_) { /* fermé */ }
+  }, 25000);
+
+  hub.subscribe(req.user.id, res);
+
+  res.on('close', () => {
+    clearInterval(heartbeat);
+    hub.unsubscribe(req.user.id, res);
+  });
 });
 
 // ══════════════════════════════════════════════════════════════════
