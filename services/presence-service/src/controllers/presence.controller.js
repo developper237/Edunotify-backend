@@ -228,7 +228,7 @@ const PresenceController = {
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { code } = req.body;
+    const { code, deviceId } = req.body;
 
     try {
       // Récupérer la session depuis Redis
@@ -249,6 +249,27 @@ const PresenceController = {
         return res.status(403).json({
           error: 'Ce code n\'est pas destiné à votre classe',
         });
+      }
+
+      // ✅ Anti-fraude : vérifier si cet appareil a déjà été utilisé pour
+      // répondre à cette séance avec un AUTRE compte
+      if (deviceId) {
+        const deviceDejaUtilise = await prisma.presence.findFirst({
+          where:   {
+            sessionId: sessionData.sessionId,
+            deviceId,
+            statut: 'present',
+          },
+          include: { user: { select: { prenom: true, nom: true } } },
+        });
+
+        if (deviceDejaUtilise) {
+          return res.status(409).json({
+            error:    `Cet appareil a déjà confirmé la présence de ${deviceDejaUtilise.user.prenom} ${deviceDejaUtilise.user.nom} pour cette séance`,
+            code:     'DEVICE_ALREADY_USED',
+            etudiant: `${deviceDejaUtilise.user.prenom} ${deviceDejaUtilise.user.nom}`,
+          });
+        }
       }
 
       // Vérifier si déjà enregistré
@@ -273,6 +294,7 @@ const PresenceController = {
           sessionId: sessionData.sessionId,
           userId:    req.user.id,
           statut:    'present',
+          deviceId:  deviceId || null, // ✅ stocker le device ID pour l'anti-fraude
         },
       });
 
