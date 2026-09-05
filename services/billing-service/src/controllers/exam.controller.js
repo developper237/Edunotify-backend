@@ -155,6 +155,17 @@ const getSession = async (req, res) => {
     });
     if (!session) return res.status(404).json({ error: 'Session introuvable' });
 
+    // Sécurité : ne JAMAIS envoyer la clé 'correct' aux étudiants
+    if (session.sujets) {
+      session.sujets = session.sujets.map(s => {
+        if (s.options && s.options.correct) {
+          const { correct, ...safeOptions } = s.options;
+          return { ...s, options: safeOptions };
+        }
+        return s;
+      });
+    }
+
     return res.json({ session });
   } catch (err) {
     console.error('[getSession]', err.message);
