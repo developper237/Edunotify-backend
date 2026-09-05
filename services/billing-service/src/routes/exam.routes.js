@@ -14,6 +14,9 @@ router.get('/sessions/mes-sessions', ctrl.mesSessions);
 // Résultats étudiant (ses examens passés)
 router.get('/sessions/mes-resultats', ctrl.mesResultats);
 
+// Correction d'un examen (étudiant ayant terminé)
+router.get('/sessions/:id/correction', ctrl.getCorrection);
+
 // Créer une session d'examen (prof)
 router.post('/sessions', ctrl.creerSession);
 

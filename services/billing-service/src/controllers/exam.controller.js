@@ -487,6 +487,87 @@ const soumettreExamen = async (req, res) => {
   }
 };
 
+// ──────────────────────────────────────────────────────────────────
+// GET /exam/sessions/:id/correction — Correction d'un examen
+// Retourne les sujets avec la bonne réponse + la réponse de l'étudiant
+// ──────────────────────────────────────────────────────────────────
+
+const getCorrection = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+
+    // Vérifier que l'étudiant a bien participé et terminé
+    const participant = await prisma.participantExamen.findUnique({
+      where: { sessionId_userId: { sessionId: id, userId } },
+    });
+    if (!participant) {
+      return res.status(404).json({ error: 'Vous n\'avez pas participé à cette session' });
+    }
+    if (participant.statut !== 'termine' && participant.statut !== 'invalide') {
+      return res.status(400).json({ error: 'Examen non terminé — la correction n\'est pas encore disponible' });
+    }
+
+    // Charger les sujets + réponses de l'étudiant
+    const sujets = await prisma.sujetExamen.findMany({
+      where: { sessionId: id },
+      orderBy: { ordre: 'asc' },
+    });
+
+    const reponses = await prisma.reponseExamen.findMany({
+      where: { participantId: participant.id },
+    });
+
+    const session = await prisma.sessionExamen.findUnique({
+      where: { id },
+      select: { titre: true, matiere: true, prof: { select: { nom: true, prenom: true } } },
+    });
+
+    const totalPoints = sujets.reduce((sum, s) => sum + s.points, 0);
+    const noteSur20 = totalPoints > 0 && participant.score != null
+      ? parseFloat((participant.score / totalPoints * 20).toFixed(1))
+      : null;
+
+    const correction = sujets.map((sujet) => {
+      const rep = reponses.find(r => r.sujetId === sujet.id);
+      const options = sujet.options || {};
+      const correctKey = options.correct || null;
+      const etudiantReponse = rep ? rep.reponse : null;
+      const estCorrecte = rep ? rep.estCorrecte : null;
+
+      return {
+        id: sujet.id,
+        intitule: sujet.intitule,
+        enonce: sujet.enonce,
+        typeQuestion: sujet.typeQuestion,
+        options: sujet.options,
+        points: sujet.points,
+        ordre: sujet.ordre,
+        correctKey,
+        etudiantReponse,
+        estCorrecte,
+        pointsObtenus: rep ? rep.pointsObtenus : null,
+      };
+    });
+
+    return res.json({
+      session: {
+        titre: session?.titre,
+        matiere: session?.matiere,
+        profNom: session?.prof ? `${session.prof.prenom} ${session.prof.nom}` : '',
+      },
+      correction,
+      score: participant.score,
+      totalPoints,
+      noteSur20,
+      statutParticipant: participant.statut,
+    });
+  } catch (err) {
+    console.error('[getCorrection]', err.message);
+    return res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
 module.exports = {
   creerSession,
   mesSessions,
@@ -499,4 +580,5 @@ module.exports = {
   getResultats,
   mesResultats,
   soumettreExamen,
+  getCorrection,
 };
