@@ -373,7 +373,11 @@ const mesResultats = async (req, res) => {
     const participants = await prisma.participantExamen.findMany({
       where: {
         userId,
-        statut: { in: ['termine', 'invalide'] },
+        OR: [
+          { statut: { in: ['termine', 'invalide'] } },
+          // Inclure aussi les participants encore 'connecte' si la session est terminée
+          { statut: 'connecte', session: { statut: 'termine' } },
+        ],
       },
       include: {
         session: {
