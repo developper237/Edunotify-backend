@@ -383,7 +383,7 @@ const mesResultats = async (req, res) => {
         session: {
           include: {
             prof: { select: { id: true, nom: true, prenom: true } },
-            _count: { select: { sujets: true } },
+            sujets: { select: { points: true } },
           },
         },
       },
@@ -406,7 +406,7 @@ const mesResultats = async (req, res) => {
         fin: p.session.fin,
         dateCreation: p.session.createdAt,
         profNom: p.session.prof ? `${p.session.prof.prenom} ${p.session.prof.nom}` : '',
-        nbSujets: p.session._count.sujets,
+        nbSujets: p.session.sujets.length,
         score: p.score,
         totalPoints,
         noteSur20,
