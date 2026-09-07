@@ -318,12 +318,36 @@ app.get('/academic/requetes',
           ],
         },
         include: {
-          etudiant: { select: { id: true, nom: true, prenom: true, matricule: true, email: true } },
+          etudiant: { select: { id: true, nom: true, prenom: true, matricule: true, email: true, filiere: true, classe: { select: { nom: true } } } },
           matiere:  { select: { id: true, nom: true } },
           note:     { select: { id: true, valeur: true, publicationId: true } },
         },
         orderBy: { createdAt: 'desc' },
       });
+
+      // Grouper par étudiant pour la vue répertoire
+      const parEtudiant = {};
+      for (const r of requetes) {
+        const eid = r.etudiant.id;
+        if (!parEtudiant[eid]) {
+          parEtudiant[eid] = {
+            etudiantId: eid,
+            nom:        r.etudiant.nom,
+            prenom:     r.etudiant.prenom,
+            matricule:  r.etudiant.matricule,
+            filiere:    r.etudiant.filiere || '',
+            classe:     r.etudiant.classe?.nom || '',
+            nbRequetes: 0,
+            enAttente:  0,
+            traitees:   0,
+            rejetees:   0,
+          };
+        }
+        parEtudiant[eid].nbRequetes++;
+        if (r.statut === 'en_attente') parEtudiant[eid].enAttente++;
+        else if (r.statut === 'traitee') parEtudiant[eid].traitees++;
+        else parEtudiant[eid].rejetees++;
+      }
 
       return res.json({
         requetes: requetes.map(r => ({
@@ -331,15 +355,78 @@ app.get('/academic/requetes',
           statut:       r.statut,
           motif:        r.motif,
           reponse:      r.reponse,
+          pieceJointe:  r.pieceJointe || null,
           createdAt:    r.createdAt,
           updatedAt:    r.updatedAt,
-          etudiant:     r.etudiant,
+          etudiant:     { id: r.etudiant.id, nom: r.etudiant.nom, prenom: r.etudiant.prenom, matricule: r.etudiant.matricule },
+          matiere:      r.matiere.nom,
+          noteActuelle: r.note.valeur,
+        })),
+        parEtudiant: Object.values(parEtudiant),
+      });
+    } catch (err) {
+      console.error('[Academic] Requêtes chef:', err);
+      return res.status(500).json({ error: 'Erreur serveur' });
+    }
+  }
+);
+
+// ══════════════════════════════════════════════════════════════════
+// CHEF — Requêtes d'un étudiant spécifique
+// ══════════════════════════════════════════════════════════════════
+
+app.get('/academic/requetes/etudiant/:etudiantId',
+  auth, requireRole('chef_departement'),
+  async (req, res) => {
+    try {
+      const chef     = await prisma.user.findUnique({ where: { id: req.user.id } });
+      const classes  = await prisma.classe.findMany({
+        where:  { departementId: chef.departementId },
+        select: { id: true },
+      });
+      const classeIds = classes.map(c => c.id);
+
+      const requetes = await prisma.requeteNote.findMany({
+        where: {
+          etudiantId: req.params.etudiantId,
+          OR: [
+            { matiere: { departementId: chef.departementId } },
+            { matiere: { classeId: { in: classeIds } } },
+          ],
+        },
+        include: {
+          etudiant: { select: { id: true, nom: true, prenom: true, matricule: true, email: true, filiere: true, classe: { select: { nom: true } } } },
+          matiere:  { select: { id: true, nom: true } },
+          note:     { select: { id: true, valeur: true, publicationId: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      if (requetes.length === 0)
+        return res.status(404).json({ error: 'Aucune requête pour cet étudiant' });
+
+      const etudiant = requetes[0].etudiant;
+
+      return res.json({
+        etudiant: {
+          id: etudiant.id, nom: etudiant.nom, prenom: etudiant.prenom,
+          matricule: etudiant.matricule, filiere: etudiant.filiere || '',
+          classe: etudiant.classe?.nom || '', email: etudiant.email,
+        },
+        requetes: requetes.map(r => ({
+          id:           r.id,
+          statut:       r.statut,
+          motif:        r.motif,
+          reponse:      r.reponse,
+          pieceJointe:  r.pieceJointe || null,
+          createdAt:    r.createdAt,
+          updatedAt:    r.updatedAt,
           matiere:      r.matiere.nom,
           noteActuelle: r.note.valeur,
         })),
       });
     } catch (err) {
-      console.error('[Academic] Requêtes chef:', err);
+      console.error('[Academic] Requêtes étudiant:', err);
       return res.status(500).json({ error: 'Erreur serveur' });
     }
   }
@@ -575,7 +662,7 @@ app.get('/academic/badge',
 app.post('/academic/requetes',
   auth, requireRole(['etudiant', 'delegue']), // 💡 AJOUTÉ : 'delegue'
   async (req, res) => {
-  const { noteId, publicationId, matiereId, motif, type } = req.body;
+  const { noteId, publicationId, matiereId, motif, type, pieceJointe } = req.body;
 if (!motif || !matiereId) {
   return res.status(400).json({ error: 'matiereId et motif requis' });
 }
@@ -627,14 +714,22 @@ await prisma.note.create({
   if (existante) return res.status(409).json({ error: 'Requête déjà en attente pour cette note' });
 
   const requete = await prisma.requeteNote.create({
-    data: { noteId: note.id, matiereId: note.matiereId, etudiantId: req.user.id, motif: motif.trim() },
+    data: {
+      noteId: note.id,
+      matiereId: note.matiereId,
+      etudiantId: req.user.id,
+      motif: motif.trim(),
+      pieceJointe: pieceJointe || null,
+    },
   });
 
   return res.status(201).json({
     message: 'Requête soumise',
     requete: {
       id: requete.id, statut: requete.statut,
-      motif: requete.motif, matiere: note.matiere.nom, createdAt: requete.createdAt,
+      motif: requete.motif, matiere: note.matiere.nom,
+      pieceJointe: requete.pieceJointe,
+      createdAt: requete.createdAt,
     },
   });
 } catch (err) {
@@ -661,6 +756,7 @@ app.get('/academic/requetes/mes-requetes',
       return res.json({
         requetes: requetes.map(r => ({
           id: r.id, statut: r.statut, motif: r.motif, reponse: r.reponse,
+          pieceJointe: r.pieceJointe || null,
           matiere: r.matiere.nom, noteActuelle: r.note.valeur,
           createdAt: r.createdAt, updatedAt: r.updatedAt,
         })),

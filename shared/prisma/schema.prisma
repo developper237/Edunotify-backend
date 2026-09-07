@@ -425,6 +425,7 @@ model RequeteNote {
   motif         String
   statut        StatutRequete @default(en_attente)
   reponse       String?
+  pieceJointe   String?       // URL ou base64 du document justificatif
   noteId        String? // ← optionnel (null si note absente)
   publicationId String? // ← nouveau : pour les notes absentes
   matiereId     String
