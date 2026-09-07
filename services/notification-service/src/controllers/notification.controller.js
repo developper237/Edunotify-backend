@@ -90,6 +90,13 @@ const resolveDestinataires = async (destinataires, user) => {
       where = {};
   }
 
+  // Exclure l'expéditeur de la liste des destinataires
+  if (where.id) {
+    where.id = { notIn: [user.id, ...(Array.isArray(where.id.notIn) ? where.id.notIn : [])] };
+  } else {
+    where.id = { not: user.id };
+  }
+
   const users = await prisma.user.findMany({
     where,
     select: { id: true, fcmToken: true },
