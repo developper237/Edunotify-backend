@@ -25,7 +25,7 @@ const PORT = process.env.PORT || 3007;
 app.use(helmet());
 app.use(cors());
 app.use(morgan('dev'));
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 // ── Routes ────────────────────────────────────────────────────────
 app.use('/billing', billingRoutes);
