@@ -363,8 +363,7 @@ router.post('/groups/:id/messages', async (req, res) => {
   try {
     const userId = req.headers['x-user-id'];
     const etablissementId = req.headers['x-etab-id'];
-    const { id } = req.params;
-    const { texte, pieceJointe } = req.body;
+    const { texte, pieceJointe, clientId } = req.body;
 
     if ((!texte || !texte.trim()) && !pieceJointe) {
       return res.status(400).json({ error: 'texte ou pièce jointe requis' });
@@ -394,10 +393,21 @@ router.post('/groups/:id/messages', async (req, res) => {
       return res.status(403).json({ error: 'Vous n\'êtes pas membre de ce groupe' });
     }
 
+    const existing = clientId
+      ? await prisma.messageGroupe.findFirst({
+          where: { groupId: id, userId, clientId },
+          include: {
+            user: { select: { id: true, nom: true, prenom: true, photoUrl: true } },
+          },
+        })
+      : null;
+    if (existing) return res.status(200).json(existing);
+
     const message = await prisma.messageGroupe.create({
       data: {
         groupId: id,
         userId,
+        clientId: clientId || undefined,
         texte: texte || '',
         pieceJointe: pieceJointe || undefined,
         luPar: [userId], // l'expéditeur a déjà "lu" son propre message
@@ -630,8 +640,8 @@ router.get('/privates/:id/messages', async (req, res) => {
 router.post('/privates/:id/messages', async (req, res) => {
   try {
     const userId = req.headers['x-user-id'];
-    const { id } = req.params;
-    const { texte, pieceJointe } = req.body;
+    const etablissementId = req.headers['x-etab-id'];
+    const { texte, pieceJointe, clientId } = req.body;
 
     if ((!texte || !texte.trim()) && !pieceJointe) {
       return res.status(400).json({ error: 'texte ou pièce jointe requis' });
@@ -648,10 +658,21 @@ router.post('/privates/:id/messages', async (req, res) => {
       return res.status(403).json({ error: 'Accès refusé' });
     }
 
+    const existing = clientId
+      ? await prisma.messagePrive.findFirst({
+          where: { conversationId: id, userId, clientId },
+          include: {
+            user: { select: { id: true, nom: true, prenom: true, photoUrl: true } },
+          },
+        })
+      : null;
+    if (existing) return res.status(200).json(existing);
+
     const message = await prisma.messagePrive.create({
       data: {
         conversationId: id,
         userId,
+        clientId: clientId || undefined,
         texte: texte || '',
         pieceJointe: pieceJointe || undefined,
       },
