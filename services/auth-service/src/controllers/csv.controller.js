@@ -89,7 +89,10 @@ const CsvController = {
           where: {
             OR: [
               { email },
-              { matricule },
+              // Insensible à la casse : le matricule du délégué saisi dans le
+              // formulaire de classe peut différer en casse de celui du CSV —
+              // sa propre ligne serait sinon recréée (erreur d'unicité).
+              { matricule: { equals: matricule, mode: 'insensitive' } },
             ],
           },
         });

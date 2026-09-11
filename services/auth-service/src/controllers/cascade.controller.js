@@ -292,7 +292,7 @@ const CascadeController = {
   // Dans cascade.controller.js
 
   creerClasse: async (req, res) => {
-  const { nomSalle, filiere, niveau, formation, emailDelegue, prenomDelegue, nomDelegue } = req.body;
+  const { nomSalle, filiere, niveau, formation, emailDelegue, prenomDelegue, nomDelegue, matriculeDelegue } = req.body;
   try {
     // 1. On récupère le chef AVEC son département (CORRECTION DU NOM DU CHAMP)
     const chef = await prisma.user.findUnique({ 
@@ -328,7 +328,29 @@ const CascadeController = {
     const passwordHash = await hashPassword(tempPassword);
 
     // 4. Création du compte délégué
-    await prisma.user.create({
+    // Le délégué est AUSSI un étudiant de sa classe : on enregistre son
+    // matricule (saisi dans le formulaire) et on le rattache comme étudiant
+    // (classeEtudiantId) pour que l'import des notes le trouve exactement
+    // comme les autres étudiants de la classe.
+    const matricule = (matriculeDelegue ?? '').toString().trim();
+    let matriculeEnregistre = matricule || null;
+    let avertissement = null;
+
+    if (matricule) {
+      const dejaPris = await prisma.user.findFirst({
+        where: { matricule: { equals: matricule, mode: 'insensitive' } },
+        select: { id: true },
+      });
+      if (dejaPris) {
+        // On ne fait JAMAIS échouer la création de la classe : on crée le
+        // délégué sans matricule et on prévient le chef de département.
+        matriculeEnregistre = null;
+        avertissement = `Le matricule ${matricule} est déjà utilisé par un autre compte : le délégué a été créé sans matricule et ne recevra pas ses notes tant qu'un administrateur ne lui en attribuera pas un.`;
+        console.warn('[CreerClasse] Matricule délégué déjà utilisé:', matricule);
+      }
+    }
+
+    const delegue = await prisma.user.create({
       data: {
         nom: nomAfficheDelegue,
         prenom: prenomDelegue || '',
@@ -336,23 +358,36 @@ const CascadeController = {
         passwordHash,
         role: 'delegue',
         statut: 'premier_login',
+        matricule: matriculeEnregistre,
         etablissementId: chef.etablissementId,
         departementId: chef.departementId,
         classeDelegueId: classe.id,
+        classeEtudiantId: classe.id,
       },
+      select: { id: true, email: true, matricule: true },
     });
 
-    // 5. ENVOI DU MAIL (CORRECTION ICI AUSSI)
-    await EmailService.sendDelegueCredentials({
-      prenom: prenomDelegue || 'Délégué',
-      nom: nomAfficheDelegue,
-      email: emailDelegue,
-      password: tempPassword,
-      classeCode: codeGenere,
-      departementNom: chef.departementChef.nom // <-- Correction ici
-    });
+    // 5. ENVOI DU MAIL — non bloquant : la classe et le compte délégué sont
+    // déjà créés, un échec SMTP ne doit pas répondre 500 (le chef croirait la
+    // création échouée et recréerait une classe en double).
+    try {
+      await EmailService.sendDelegueCredentials({
+        prenom: prenomDelegue || 'Délégué',
+        nom: nomAfficheDelegue,
+        email: emailDelegue,
+        password: tempPassword,
+        classeCode: codeGenere,
+        departementNom: chef.departementChef.nom // <-- Correction ici
+      });
+    } catch (emailErr) {
+      console.warn('[CreerClasse] Envoi des identifiants délégué échoué:', emailErr.message);
+    }
 
-    return res.status(201).json(classe);
+    return res.status(201).json({
+      ...classe,
+      delegue: { id: delegue.id, email: delegue.email, matricule: delegue.matricule },
+      ...(avertissement ? { avertissement } : {}),
+    });
   } catch (err) {
     console.error('[CreerClasse Error]', err);
     return res.status(500).json({ error: err.message });

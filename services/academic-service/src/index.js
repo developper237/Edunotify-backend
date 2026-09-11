@@ -157,8 +157,18 @@ app.post('/academic/import',
             continue;
           }
 
+          // Le délégué de la classe est AUSSI un étudiant : il peut n'être
+          // rattaché à la classe que par classeDelegueId (délégués créés avant
+          // que le formulaire n'enregistre le matricule). Comparaison
+          // insensible à la casse : « 21g0042 » doit matcher « 21G0042 ».
           const etudiant = await prisma.user.findFirst({
-            where: { matricule, classeEtudiantId: classeId },
+            where: {
+              matricule: { equals: matricule, mode: 'insensitive' },
+              OR: [
+                { classeEtudiantId: classeId },
+                { classeDelegueId: classeId },
+              ],
+            },
           });
 
           if (!etudiant) {
@@ -490,15 +500,20 @@ app.get('/academic/mes-publications',
     try {
       const etudiant = await prisma.user.findUnique({
         where:   { id: req.user.id },
-        include: { classeEtudiant: true },
+        include: { classeEtudiant: true, classeDelegue: true },
       });
 
-      if (!etudiant?.classeEtudiantId)
+      // Un délégué est aussi étudiant de sa classe : il peut n'être rattaché
+      // que par classeDelegueId (promotion créée avant l'enregistrement du
+      // matricule du délégué).
+      const classeId = etudiant?.classeEtudiantId || etudiant?.classeDelegueId;
+
+      if (!classeId)
         return res.json({ publications: [] });
 
       const publications = await prisma.publicationNotes.findMany({
         where: {
-          classeId: etudiant.classeEtudiantId,
+          classeId,
           notes: {
             some: { etudiantId: req.user.id, publiee: true },
           },
@@ -559,7 +574,7 @@ app.get('/academic/publications/:id/bulletin',
 
       const etudiant = await prisma.user.findUnique({
         where:   { id: req.user.id },
-        include: { classeEtudiant: true },
+        include: { classeEtudiant: true, classeDelegue: true },
       });
 
       const matieres = await prisma.matiere.findMany({
@@ -613,7 +628,7 @@ app.get('/academic/publications/:id/bulletin',
           nom:       etudiant.nom,
           prenom:    etudiant.prenom,
           matricule: etudiant.matricule,
-          classe:    etudiant.classeEtudiant?.codeGenere,
+          classe:    etudiant.classeEtudiant?.codeGenere || etudiant.classeDelegue?.codeGenere,
         },
         notes:   lignes,
         moyenne,
@@ -636,13 +651,15 @@ app.get('/academic/badge',
   async (req, res) => {
     try {
       const etudiant = await prisma.user.findUnique({ where: { id: req.user.id } });
-      if (!etudiant?.classeEtudiantId) return res.json({ count: 0 });
+      // Le délégué compte comme un étudiant de sa classe (classeDelegueId).
+      const classeId = etudiant?.classeEtudiantId || etudiant?.classeDelegueId;
+      if (!classeId) return res.json({ count: 0 });
 
       const depuis = req.query.depuis ? new Date(req.query.depuis) : null;
 
       const count = await prisma.publicationNotes.count({
         where: {
-          classeId: etudiant.classeEtudiantId,
+          classeId,
           notes:    { some: { etudiantId: req.user.id, publiee: true } },
           ...(depuis ? { publieLe: { gt: depuis } } : {}),
         },
@@ -781,7 +798,7 @@ app.get('/academic/mes-classes',
       let departementId = user?.departementId;
       if (!departementId && req.user.role === 'delegue') {
         const classeDelegue = await prisma.classe.findUnique({
-          where: { id: user?.classeEtudiantId }
+          where: { id: user?.classeEtudiantId || user?.classeDelegueId }
         });
         departementId = classeDelegue?.departementId;
       }

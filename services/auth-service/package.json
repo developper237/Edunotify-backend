@@ -9,7 +9,8 @@
     "db:generate": "prisma generate --schema=../../shared/prisma/schema.prisma",
     "db:migrate": "prisma migrate deploy --schema=../../shared/prisma/schema.prisma",
     "db:push": "prisma db push --schema=../../shared/prisma/schema.prisma",
-    "db:seed": "node src/utils/seed.js"
+    "db:seed": "node src/utils/seed.js",
+    "test": "node tests/creer-classe.test.js"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
