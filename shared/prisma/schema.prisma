@@ -709,6 +709,7 @@ model MessageGroupe {
   id           String   @id @default(cuid())
   groupId      String
   userId       String
+  clientId     String? // identifiant stable fourni par le client pour éviter les doublons hors-ligne
   texte        String
   pieceJointe  Json? // { nom, url, taille, type }
   luPar        Json? // tableau d'ids d'utilisateurs qui ont lu
@@ -717,6 +718,7 @@ model MessageGroupe {
   groupe GroupeChat @relation(fields: [groupId], references: [id], onDelete: Cascade)
   user   User       @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@unique([groupId, clientId])
   @@index([groupId, createdAt])
 }
 
@@ -745,6 +747,7 @@ model MessagePrive {
   id             String   @id @default(cuid())
   conversationId String
   userId         String
+  clientId       String? // identifiant stable fourni par le client pour éviter les doublons hors-ligne
   texte          String
   pieceJointe    Json? // { nom, url, taille, type }
   lu             Boolean  @default(false)
@@ -753,5 +756,6 @@ model MessagePrive {
   conversation ConversationPrivee @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@unique([conversationId, clientId])
   @@index([conversationId, createdAt])
 }

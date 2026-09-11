@@ -9,7 +9,7 @@
     "db:generate": "prisma generate --schema=../../shared/prisma/schema.prisma",
     "db:migrate": "prisma migrate deploy --schema=../../shared/prisma/schema.prisma",
     "db:push": "prisma db push --schema=../../shared/prisma/schema.prisma",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node tests/chat-routes.test.js sans-clientid && node tests/chat-routes.test.js avec-clientid"
   },
   "keywords": [],
   "author": "",

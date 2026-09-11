@@ -69,6 +69,67 @@ const envoyerPushChat = async (tokens, titre, contenu, data = {}) => {
 // Nom complet d'un expéditeur pour le contenu du push
 const nomExpediteur = (u) => `${u?.prenom ?? ''} ${u?.nom ?? ''}`.trim();
 
+// ── Support de `clientId` (idempotence des envois hors-ligne) ────
+// Le client Prisma ou la base peuvent ne pas encore connaître la colonne
+// `clientId` (schéma non poussé / client non régénéré). Sans ce garde-fou,
+// chaque envoi échouait en 500 « Erreur serveur ». On détecte la colonne une
+// seule fois : si elle manque, l'envoi reste fonctionnel et seule la
+// déduplication hors-ligne est désactivée (avec un avertissement au démarrage).
+let _clientIdSupporte = null;
+
+const clientIdSupporte = async () => {
+  if (_clientIdSupporte !== null) return _clientIdSupporte;
+  try {
+    await prisma.messageGroupe.findFirst({
+      where: { clientId: null },
+      select: { id: true },
+    });
+    _clientIdSupporte = true;
+  } catch (err) {
+    _clientIdSupporte = false;
+    console.warn(
+      '[Chat] Colonne clientId indisponible — idempotence hors-ligne désactivée. ' +
+        'Lancez « prisma db push » pour l\'activer :',
+      err.message
+    );
+  }
+  return _clientIdSupporte;
+};
+
+// Normalise le clientId reçu du mobile (chaîne non vide) ou null
+const normaliserClientId = (clientId) => {
+  if (typeof clientId !== 'string') return null;
+  const cid = clientId.trim();
+  return cid.length ? cid.slice(0, 191) : null;
+};
+
+// Champs renvoyés au mobile, TOUJOURS listés explicitement (et non la
+// sélection implicite de Prisma) : sur une base qui n'a pas encore la colonne
+// `clientId`, une sélection implicite ferait échouer la requête en P2022.
+const SELECT_USER = { select: { id: true, nom: true, prenom: true, photoUrl: true } };
+
+const champsMessageGroupe = (avecClientId) => ({
+  id: true,
+  groupId: true,
+  userId: true,
+  texte: true,
+  pieceJointe: true,
+  luPar: true,
+  createdAt: true,
+  ...(avecClientId ? { clientId: true } : {}),
+});
+
+const champsMessagePrive = (avecClientId) => ({
+  id: true,
+  conversationId: true,
+  userId: true,
+  texte: true,
+  pieceJointe: true,
+  lu: true,
+  createdAt: true,
+  ...(avecClientId ? { clientId: true } : {}),
+});
+
 // ── Tous les utilisateurs authentifiés peuvent accéder au chat ──
 router.use(auth);
 
@@ -98,7 +159,13 @@ router.get('/groups', async (req, res) => {
         : { etablissementId },
       include: {
         _count: { select: { membres: true, messages: true } },
-        messages: { orderBy: { createdAt: 'desc' }, take: 1 },
+        // Champs explicites : la sélection implicite de Prisma inclurait
+        // `clientId`, absent des bases pas encore migrées.
+        messages: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: { texte: true, createdAt: true },
+        },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -319,10 +386,12 @@ router.get('/groups/:id/messages', async (req, res) => {
       where.createdAt = { gt: new Date(apres) };
     }
 
+    const avecClientId = await clientIdSupporte();
     const messages = await prisma.messageGroupe.findMany({
       where,
-      include: {
-        user: { select: { id: true, nom: true, prenom: true, photoUrl: true } },
+      select: {
+        ...champsMessageGroupe(avecClientId),
+        user: SELECT_USER,
       },
       orderBy: { createdAt: 'asc' },
       take: apres ? undefined : limit,
@@ -338,6 +407,7 @@ router.get('/groups/:id/messages', async (req, res) => {
         await prisma.messageGroupe.update({
           where: { id: m.id },
           data: { luPar: [...luPar, userId] },
+          select: { id: true }, // sélection minimale (évite toute colonne absente)
         });
       }
       // Met à jour le curseur de lecture du membre → permet un comptage
@@ -361,6 +431,7 @@ router.get('/groups/:id/messages', async (req, res) => {
 // ── POST /chat/groups/:id/messages — Envoyer un message ─────────
 router.post('/groups/:id/messages', async (req, res) => {
   try {
+    const { id } = req.params;
     const userId = req.headers['x-user-id'];
     const etablissementId = req.headers['x-etab-id'];
     const { texte, pieceJointe, clientId } = req.body;
@@ -371,6 +442,8 @@ router.post('/groups/:id/messages', async (req, res) => {
     if (!userId) {
       return res.status(400).json({ error: 'userId requis' });
     }
+
+    console.log('[Chat] POST /groups/:id/messages', { groupId: id, userId, texte: (texte || '').slice(0, 50), clientId });
 
     // Isolation : vérifier que le groupe appartient à l'établissement de l'utilisateur
     const groupe = await prisma.groupeChat.findUnique({
@@ -393,29 +466,56 @@ router.post('/groups/:id/messages', async (req, res) => {
       return res.status(403).json({ error: 'Vous n\'êtes pas membre de ce groupe' });
     }
 
-    const existing = clientId
-      ? await prisma.messageGroupe.findFirst({
-          where: { groupId: id, userId, clientId },
-          include: {
-            user: { select: { id: true, nom: true, prenom: true, photoUrl: true } },
-          },
-        })
-      : null;
-    if (existing) return res.status(200).json(existing);
+    // Idempotence : un rejeu du même message (file hors-ligne) ne doit pas
+    // créer de doublon. On interroge par (groupId, clientId) — cette paire est
+    // aussi protégée par la contrainte @@unique([groupId, clientId]).
+    const avecClientId = await clientIdSupporte();
+    const cid = avecClientId ? normaliserClientId(clientId) : null;
+    const selection = {
+      ...champsMessageGroupe(avecClientId),
+      user: SELECT_USER,
+    };
 
-    const message = await prisma.messageGroupe.create({
-      data: {
-        groupId: id,
-        userId,
-        clientId: clientId || undefined,
-        texte: texte || '',
-        pieceJointe: pieceJointe || undefined,
-        luPar: [userId], // l'expéditeur a déjà "lu" son propre message
-      },
-      include: {
-        user: { select: { id: true, nom: true, prenom: true, photoUrl: true } },
-      },
-    });
+    if (cid) {
+      const existing = await prisma.messageGroupe.findFirst({
+        where: { groupId: id, clientId: cid },
+        select: selection,
+      });
+      if (existing) {
+        console.log('[Chat] Message déjà présent (clientId):', cid);
+        return res.status(200).json(existing);
+      }
+    }
+
+    let message;
+    try {
+      message = await prisma.messageGroupe.create({
+        data: {
+          groupId: id,
+          userId,
+          ...(cid ? { clientId: cid } : {}),
+          texte: texte || '',
+          pieceJointe: pieceJointe || undefined,
+          luPar: [userId], // l'expéditeur a déjà "lu" son propre message
+        },
+        select: selection,
+      });
+    } catch (err) {
+      // Course entre deux envois du même message (contrainte unique) :
+      // on renvoie le message déjà enregistré plutôt qu'une erreur 500.
+      if (err.code === 'P2002' && cid) {
+        const existant = await prisma.messageGroupe.findFirst({
+          where: { groupId: id, clientId: cid },
+          select: selection,
+        });
+        if (existant) {
+          console.log('[Chat] Message déjà créé (course clientId):', cid);
+          return res.status(200).json(existant);
+        }
+      }
+      throw err;
+    }
+    console.log('[Chat] Message créé:', message.id);
 
     // ── Push FCM aux autres membres du groupe ──
     try {
@@ -427,7 +527,7 @@ router.post('/groups/:id/messages', async (req, res) => {
       envoyerPushChat(
         tokens,
         `Nouveau message dans ${groupe.nom}`,
-        `${nomExpediteur(message.user)}: ${texte.slice(0, 100)}`,
+        `${nomExpediteur(message.user)}: ${(texte || '').slice(0, 100)}`,
         { type: 'chat_groupe', groupeId: id }
       );
     } catch (pushErr) {
@@ -530,7 +630,13 @@ router.get('/privates', async (req, res) => {
       include: {
         initiateur: { select: { id: true, nom: true, prenom: true, photoUrl: true } },
         invite: { select: { id: true, nom: true, prenom: true, photoUrl: true } },
-        messages: { orderBy: { createdAt: 'desc' }, take: 1 },
+        // Champs explicites : la sélection implicite de Prisma inclurait
+        // `clientId`, absent des bases pas encore migrées.
+        messages: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: { texte: true, createdAt: true, userId: true, lu: true },
+        },
       },
       orderBy: { updatedAt: 'desc' },
     });
@@ -614,12 +720,16 @@ router.get('/privates/:id/messages', async (req, res) => {
     }
 
     const apres = req.query.apres; // récupération incrémentale
+    const avecClientId = await clientIdSupporte();
     const messages = await prisma.messagePrive.findMany({
       where: {
         conversationId: id,
         ...(apres ? { createdAt: { gt: new Date(apres) } } : {}),
       },
-      include: { user: { select: { id: true, nom: true, prenom: true, photoUrl: true } } },
+      select: {
+        ...champsMessagePrive(avecClientId),
+        user: SELECT_USER,
+      },
       orderBy: { createdAt: 'asc' },
     });
 
@@ -639,6 +749,7 @@ router.get('/privates/:id/messages', async (req, res) => {
 // ── POST /chat/privates/:id/messages — Envoyer un message privé ──
 router.post('/privates/:id/messages', async (req, res) => {
   try {
+    const { id } = req.params;
     const userId = req.headers['x-user-id'];
     const etablissementId = req.headers['x-etab-id'];
     const { texte, pieceJointe, clientId } = req.body;
@@ -650,6 +761,8 @@ router.post('/privates/:id/messages', async (req, res) => {
       return res.status(400).json({ error: 'userId requis' });
     }
 
+    console.log('[Chat] POST /privates/:id/messages', { conversationId: id, userId, texte: (texte || '').slice(0, 50), clientId });
+
     const conversation = await prisma.conversationPrivee.findUnique({ where: { id } });
     if (!conversation) {
       return res.status(404).json({ error: 'Conversation introuvable' });
@@ -658,26 +771,55 @@ router.post('/privates/:id/messages', async (req, res) => {
       return res.status(403).json({ error: 'Accès refusé' });
     }
 
-    const existing = clientId
-      ? await prisma.messagePrive.findFirst({
-          where: { conversationId: id, userId, clientId },
-          include: {
-            user: { select: { id: true, nom: true, prenom: true, photoUrl: true } },
-          },
-        })
-      : null;
-    if (existing) return res.status(200).json(existing);
+    // Idempotence : un rejeu du même message (file hors-ligne) ne doit pas
+    // créer de doublon. On interroge par (conversationId, clientId) — cette
+    // paire est aussi protégée par @@unique([conversationId, clientId]).
+    const avecClientId = await clientIdSupporte();
+    const cid = avecClientId ? normaliserClientId(clientId) : null;
+    const selection = {
+      ...champsMessagePrive(avecClientId),
+      user: SELECT_USER,
+    };
 
-    const message = await prisma.messagePrive.create({
-      data: {
-        conversationId: id,
-        userId,
-        clientId: clientId || undefined,
-        texte: texte || '',
-        pieceJointe: pieceJointe || undefined,
-      },
-      include: { user: { select: { id: true, nom: true, prenom: true, photoUrl: true } } },
-    });
+    if (cid) {
+      const existing = await prisma.messagePrive.findFirst({
+        where: { conversationId: id, clientId: cid },
+        select: selection,
+      });
+      if (existing) {
+        console.log('[Chat] Message privé déjà présent (clientId):', cid);
+        return res.status(200).json(existing);
+      }
+    }
+
+    let message;
+    try {
+      message = await prisma.messagePrive.create({
+        data: {
+          conversationId: id,
+          userId,
+          ...(cid ? { clientId: cid } : {}),
+          texte: texte || '',
+          pieceJointe: pieceJointe || undefined,
+        },
+        select: selection,
+      });
+    } catch (err) {
+      // Course entre deux envois du même message (contrainte unique) :
+      // on renvoie le message déjà enregistré plutôt qu'une erreur 500.
+      if (err.code === 'P2002' && cid) {
+        const existant = await prisma.messagePrive.findFirst({
+          where: { conversationId: id, clientId: cid },
+          select: selection,
+        });
+        if (existant) {
+          console.log('[Chat] Message privé déjà créé (course clientId):', cid);
+          return res.status(200).json(existant);
+        }
+      }
+      throw err;
+    }
+    console.log('[Chat] Message privé créé:', message.id);
 
     await prisma.conversationPrivee.update({ where: { id }, data: { updatedAt: new Date() } });
 
@@ -693,7 +835,7 @@ router.post('/privates/:id/messages', async (req, res) => {
         envoyerPushChat(
           [autre.fcmToken],
           'Nouveau message',
-          `${nomExpediteur(message.user)}: ${texte.slice(0, 100)}`,
+          `${nomExpediteur(message.user)}: ${(texte || '').slice(0, 100)}`,
           { type: 'chat_prive', conversationId: id }
         );
       }
@@ -876,7 +1018,10 @@ router.delete('/groups/:id/messages/:messageId', async (req, res) => {
     const { id, messageId } = req.params;
     if (!userId) return res.status(400).json({ error: 'userId requis' });
 
-    const message = await prisma.messageGroupe.findUnique({ where: { id: messageId } });
+    const message = await prisma.messageGroupe.findUnique({
+      where: { id: messageId },
+      select: { id: true, groupId: true, userId: true },
+    });
     if (!message || message.groupId !== id) {
       return res.status(404).json({ error: 'Message introuvable' });
     }
@@ -884,7 +1029,10 @@ router.delete('/groups/:id/messages/:messageId', async (req, res) => {
       return res.status(403).json({ error: 'Seul l\'auteur du message peut le supprimer' });
     }
 
-    await prisma.messageGroupe.delete({ where: { id: messageId } });
+    await prisma.messageGroupe.delete({
+      where: { id: messageId },
+      select: { id: true },
+    });
     res.json({ success: true });
   } catch (err) {
     console.error('[Chat] Erreur DELETE message groupe:', err);
@@ -899,7 +1047,10 @@ router.delete('/privates/:id/messages/:messageId', async (req, res) => {
     const { id, messageId } = req.params;
     if (!userId) return res.status(400).json({ error: 'userId requis' });
 
-    const message = await prisma.messagePrive.findUnique({ where: { id: messageId } });
+    const message = await prisma.messagePrive.findUnique({
+      where: { id: messageId },
+      select: { id: true, conversationId: true, userId: true },
+    });
     if (!message || message.conversationId !== id) {
       return res.status(404).json({ error: 'Message introuvable' });
     }
@@ -907,7 +1058,10 @@ router.delete('/privates/:id/messages/:messageId', async (req, res) => {
       return res.status(403).json({ error: 'Seul l\'auteur du message peut le supprimer' });
     }
 
-    await prisma.messagePrive.delete({ where: { id: messageId } });
+    await prisma.messagePrive.delete({
+      where: { id: messageId },
+      select: { id: true },
+    });
     res.json({ success: true });
   } catch (err) {
     console.error('[Chat] Erreur DELETE message privé:', err);
